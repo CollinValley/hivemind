@@ -44,7 +44,7 @@ impl<Packet: Send + Sized + 'static> Join<Packet> {
 
         let stream = JoinStream::new(from_ingressors, task_parks, num_inputs);
         Join {
-            runnables: runnables,
+            runnables,
             stream: Box::new(stream),
         }
     }

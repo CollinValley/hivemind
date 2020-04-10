@@ -1,6 +1,6 @@
 pub mod link;
 pub mod utils;
-use crate::link::{Classify, Fork, Join, Process, Queue};
+use crate::link::{Classify, Join, Process, Queue};
 
 pub trait Processor {
     type Input: Send + Clone;
@@ -49,7 +49,7 @@ impl<Packet: Send + Sized + Clone + 'static> Link<Packet> {
         let mut runnables = vec![];
         let mut streams = vec![];
         for stream in self.streams {
-            let (mut q_runnables,mut q_streams) = Queue::new(stream, cap).into_link().take();
+            let (mut q_runnables, mut q_streams) = Queue::new(stream, cap).into_link().take();
             runnables.append(&mut q_runnables);
             streams.append(&mut q_streams);
         }
@@ -69,9 +69,7 @@ impl<Packet: Send + Sized + Clone + 'static> Link<Packet> {
         let mut runnables = vec![];
         let mut streams = vec![];
         for stream in self.streams {
-            let (mut f_runnables, mut f_streams) = Fork::new(stream, count, cap)
-                .into_link()
-                .take();
+            let (mut f_runnables, mut f_streams) = Link::do_fork(stream, count, cap).take();
             runnables.append(&mut f_runnables);
             streams.append(&mut f_streams);
         }
@@ -89,7 +87,6 @@ impl<Packet: Send + Sized + Clone + 'static> Link<Packet> {
         }
         links
     }
-
 }
 
 trait ProcessFn<P: Processor + Clone + Send + 'static> {
@@ -102,7 +99,8 @@ impl<P: Processor + Send + Clone + 'static> ProcessFn<P> for Link<P::Input> {
         let mut runnables = vec![];
         let mut streams = vec![];
         for stream in self.streams {
-            let (mut p_runnables, mut p_streams) = Process::new(stream, p.clone()).into_link().take();
+            let (mut p_runnables, mut p_streams) =
+                Process::new(stream, p.clone()).into_link().take();
             runnables.append(&mut p_runnables);
             streams.append(&mut p_streams);
         }
@@ -135,13 +133,15 @@ impl<C: Classifier + Clone + Send + 'static> ClassifyFn<C> for Link<C::Packet> {
         num_streams: usize,
         cap: Option<usize>,
     ) -> Link<C::Packet> {
-        let (mut c_runnables,c_streams) = Classify::new(
+        let (mut c_runnables, c_streams) = Classify::new(
             self.streams.remove(0),
             classifier,
             dispatcher,
             num_streams,
             cap,
-        ).into_link().take();
+        )
+        .into_link()
+        .take();
         self.runnables.append(&mut c_runnables);
         Link::new(self.runnables, c_streams)
     }

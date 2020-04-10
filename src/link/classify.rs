@@ -47,8 +47,8 @@ impl<C: Classifier + 'static> Classify<C> {
         let runnable = ClassifyRunnable::new(input, dispatcher, senders, classifier, task_parks);
 
         Classify {
-            runnable: runnable,
-            streams: streams,
+            runnable,
+            streams,
         }
     }
 }

@@ -1,5 +1,5 @@
 use crate::link::utils::task_park::*;
-use crate::{link::QueueStream, IntoLink, Link, PacketStream};
+use crate::{link::QueueStream, Link, PacketStream};
 use crossbeam::atomic::AtomicCell;
 use crossbeam::crossbeam_channel;
 use crossbeam::crossbeam_channel::{Receiver, Sender};
@@ -9,13 +9,19 @@ use futures::task::{Context, Poll};
 use std::pin::Pin;
 use std::sync::Arc;
 
+/*
 pub struct Fork<Packet: Clone + Send> {
     runnable: ForkRunnable<Packet>,
     streams: Vec<PacketStream<Packet>>,
 }
+*/
 
-impl<Packet: Clone + Send + 'static> Fork<Packet> {
-    pub fn new(input: PacketStream<Packet>, count: usize, capacity: Option<usize>) -> Self {
+impl<Packet: Clone + Send + 'static> Link<Packet> {
+    pub(crate) fn do_fork(
+        input: PacketStream<Packet>,
+        count: usize,
+        capacity: Option<usize>,
+    ) -> Self {
         let mut to_egressors: Vec<Sender<Option<Packet>>> = Vec::new();
         let mut egressors: Vec<PacketStream<Packet>> = Vec::new();
 
@@ -40,13 +46,14 @@ impl<Packet: Clone + Send + 'static> Fork<Packet> {
 
         let ingressor = ForkRunnable::new(input, to_egressors, task_parks);
 
-        Fork {
-            runnable: ingressor,
+        Link {
+            runnables: vec![Box::new(ingressor)],
             streams: egressors,
         }
     }
 }
 
+/*
 impl<Packet: Send + Clone + 'static> IntoLink<Packet> for Fork<Packet> {
     fn into_link(self) -> Link<Packet> {
         Link {
@@ -55,6 +62,7 @@ impl<Packet: Send + Clone + 'static> IntoLink<Packet> for Fork<Packet> {
         }
     }
 }
+*/
 
 pub struct ForkRunnable<P> {
     input_stream: PacketStream<P>,
@@ -130,7 +138,7 @@ mod tests {
     fn no_input() {
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link = Fork::<i32>::new(immediate_stream(vec![]), 1, None).into_link();
+            let link = Link::<i32>::do_fork(immediate_stream(vec![]), 1, None);
 
             test_link(link, None).await
         });
@@ -143,7 +151,7 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link = Fork::<i32>::new(immediate_stream(packets.clone()), 1, None).into_link();
+            let link = Link::<i32>::do_fork(immediate_stream(packets.clone()), 1, None);
 
             test_link(link, None).await
         });
@@ -156,7 +164,7 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link = Fork::<i32>::new(immediate_stream(packets.clone()), 2, None).into_link();
+            let link = Link::<i32>::do_fork(immediate_stream(packets.clone()), 2, None);
 
             test_link(link, None).await
         });
@@ -171,7 +179,7 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link = Fork::<i32>::new(immediate_stream(packets.clone()), 3, None).into_link();
+            let link = Link::<i32>::do_fork(immediate_stream(packets.clone()), 3, None);
 
             test_link(link, None).await
         });

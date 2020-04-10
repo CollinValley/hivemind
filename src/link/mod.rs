@@ -25,6 +25,5 @@ pub(crate) use self::join::Join;
 
 /// Copies all input to each of its outputs, asynchronous.
 mod fork;
-pub(crate) use self::fork::Fork;
 
 mod utils;
