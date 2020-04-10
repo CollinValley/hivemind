@@ -21,7 +21,6 @@ pub(crate) use self::classify::Classify;
 
 /// Fairly combines all inputs into a single output, asynchronous.
 mod join;
-pub(crate) use self::join::Join;
 
 /// Copies all input to each of its outputs, asynchronous.
 mod fork;

@@ -1,6 +1,6 @@
 pub mod link;
 pub mod utils;
-use crate::link::{Classify, Join, Process, Queue};
+use crate::link::{Classify, Process, Queue};
 
 pub trait Processor {
     type Input: Send + Clone;
@@ -59,7 +59,7 @@ impl<Packet: Send + Sized + Clone + 'static> Link<Packet> {
 
     // Join all streams in a link into one stream.
     pub fn zip(mut self, cap: Option<usize>) -> Self {
-        let (mut runnables, streams) = Join::new(self.streams, cap).into_link().take();
+        let (mut runnables, streams) = Link::do_join(self.streams, cap).take();
         self.runnables.append(&mut runnables);
         Link::new(self.runnables, streams)
     }

@@ -1,5 +1,5 @@
 use crate::link::utils::task_park::*;
-use crate::{IntoLink, Link, PacketStream, Runnable};
+use crate::{Link, PacketStream, Runnable};
 use crossbeam::atomic::AtomicCell;
 use crossbeam::crossbeam_channel;
 use crossbeam::crossbeam_channel::{Receiver, Sender};
@@ -9,13 +9,8 @@ use futures::task::{Context, Poll};
 use std::pin::Pin;
 use std::sync::Arc;
 
-pub struct Join<Packet: Send + Sized> {
-    runnables: Vec<Runnable>,
-    stream: PacketStream<Packet>,
-}
-
-impl<Packet: Send + Sized + 'static> Join<Packet> {
-    pub fn new(input: Vec<PacketStream<Packet>>, cap: Option<usize>) -> Self {
+impl<Packet: Send + Sized + 'static> Link<Packet> {
+    pub(crate) fn do_join(input: Vec<PacketStream<Packet>>, cap: Option<usize>) -> Self {
         assert!(
             !input.is_empty(),
             format!(
@@ -43,18 +38,9 @@ impl<Packet: Send + Sized + 'static> Join<Packet> {
         }
 
         let stream = JoinStream::new(from_ingressors, task_parks, num_inputs);
-        Join {
-            runnables,
-            stream: Box::new(stream),
-        }
-    }
-}
-
-impl<Packet: Send + Sized + 'static> IntoLink<Packet> for Join<Packet> {
-    fn into_link(self) -> Link<Packet> {
         Link {
-            runnables: self.runnables,
-            streams: vec![self.stream],
+            runnables,
+            streams: vec![Box::new(stream)],
         }
     }
 }
@@ -105,7 +91,7 @@ impl<Packet: Sized> Future for JoinRunnable<Packet> {
         let ingressor = Pin::into_inner(self);
         loop {
             if ingressor.to_egressor.is_full() {
-                park_and_wake(&ingressor.task_park, cx.waker().clone()); //TODO: Change task park to cx based
+                park_and_wake(&ingressor.task_park, cx.waker().clone());
                 return Poll::Pending;
             }
             let input_packet_option: Option<Packet> =
@@ -236,7 +222,7 @@ mod tests {
                 immediate_stream(packets.clone()),
                 immediate_stream(packets.clone()),
             ];
-            let link = Join::new(inputs, None).into_link();
+            let link = Link::do_join(inputs, None);
 
             test_link(link, None).await
         });
@@ -253,7 +239,7 @@ mod tests {
                 immediate_stream(packets.clone()),
                 immediate_stream(packets.clone()),
             ];
-            let link = Join::new(inputs, None).into_link();
+            let link = Link::do_join(inputs, None);
 
             test_link(link, None).await
         });
@@ -273,7 +259,7 @@ mod tests {
                 inputs.push(immediate_stream(0..stream_len));
             }
 
-            let link = Join::new(inputs, None).into_link();
+            let link = Link::do_join(inputs, None);
 
             test_link(link, None).await
         });
@@ -297,7 +283,7 @@ mod tests {
             let inputs: Vec<PacketStream<i32>> =
                 vec![Box::new(packet_generator0), Box::new(packet_generator1)];
 
-            let link = Join::new(inputs, None).into_link();
+            let link = Link::do_join(inputs, None);
 
             test_link(link, None).await
         });
@@ -314,7 +300,7 @@ mod tests {
                 immediate_stream::<Vec<i32>>(packets.clone()),
             ];
 
-            let link = Join::new(inputs, None).into_link();
+            let link = Link::do_join(inputs, None);
 
             test_link(link, None).await
         });
@@ -330,7 +316,7 @@ mod tests {
                 immediate_stream::<Vec<i32>>(vec![]),
             ];
 
-            let link = Join::new(inputs, None).into_link();
+            let link = Link::do_join(inputs, None);
 
             test_link(link, None).await
         });
