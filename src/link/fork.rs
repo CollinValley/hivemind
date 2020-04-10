@@ -9,13 +9,6 @@ use futures::task::{Context, Poll};
 use std::pin::Pin;
 use std::sync::Arc;
 
-/*
-pub struct Fork<Packet: Clone + Send> {
-    runnable: ForkRunnable<Packet>,
-    streams: Vec<PacketStream<Packet>>,
-}
-*/
-
 impl<Packet: Clone + Send + 'static> Link<Packet> {
     pub(crate) fn do_fork(
         input: PacketStream<Packet>,
@@ -52,17 +45,6 @@ impl<Packet: Clone + Send + 'static> Link<Packet> {
         }
     }
 }
-
-/*
-impl<Packet: Send + Clone + 'static> IntoLink<Packet> for Fork<Packet> {
-    fn into_link(self) -> Link<Packet> {
-        Link {
-            runnables: vec![Box::new(self.runnable)],
-            streams: self.streams,
-        }
-    }
-}
-*/
 
 pub struct ForkRunnable<P> {
     input_stream: PacketStream<P>,
@@ -111,7 +93,6 @@ impl<P: Send + Clone> Future for ForkRunnable<P> {
                     return Poll::Ready(());
                 }
                 Some(packet) => {
-                    //TODO: should packet but put in an iterator? or only cloned? or last one reused?
                     assert!(self.to_egressors.len() == self.task_parks.len());
                     for port in 0..self.to_egressors.len() {
                         if let Err(err) = self.to_egressors[port].try_send(Some(packet.clone())) {
