@@ -1,5 +1,5 @@
 use crate::link::utils::task_park::*;
-use crate::{Link, PacketStream, Runnable, IntoLink};
+use crate::{IntoLink, Link, PacketStream, Runnable};
 use crossbeam::atomic::AtomicCell;
 use crossbeam::crossbeam_channel;
 use crossbeam::crossbeam_channel::{Receiver, Sender, TryRecvError};
@@ -195,9 +195,9 @@ impl<Packet: Sized> Stream for QueueStream<Packet> {
 mod tests {
     use super::*;
     use crate::link::Process;
-    use crate::utils::test::processor::Identity;
     use crate::utils::test::harness::{initialize_runtime, test_link};
     use crate::utils::test::packet_generators::{immediate_stream, PacketIntervalGenerator};
+    use crate::utils::test::processor::Identity;
     use core::time;
     use rand::{thread_rng, Rng};
 
@@ -207,8 +207,7 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link = Queue::new(immediate_stream(packets.clone()), Some(10))
-                .into_link();
+            let link = Queue::new(immediate_stream(packets.clone()), Some(10)).into_link();
 
             test_link(link, None).await
         });
@@ -222,8 +221,7 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link =
-                Queue::new(immediate_stream(0..stream_len), Some(10)).into_link();
+            let link = Queue::new(immediate_stream(0..stream_len), Some(10)).into_link();
 
             test_link(link, None).await
         });
@@ -236,8 +234,7 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link =
-                Queue::new(immediate_stream(packets.clone()), Some(1)).into_link();
+            let link = Queue::new(immediate_stream(packets.clone()), Some(1)).into_link();
 
             test_link(link, None).await
         });
@@ -249,8 +246,7 @@ mod tests {
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
             let packets: Vec<i32> = vec![];
-            let link = Queue::new(immediate_stream(packets.clone()), Some(10))
-                .into_link();
+            let link = Queue::new(immediate_stream(packets.clone()), Some(10)).into_link();
 
             test_link(link, None).await
         });
@@ -263,10 +259,13 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let (mut runnables, mut streams0) = Queue::new(immediate_stream(packets.clone()), Some(10))
-                .into_link().take();
+            let (mut runnables, mut streams0) =
+                Queue::new(immediate_stream(packets.clone()), Some(10))
+                    .into_link()
+                    .take();
 
-            let (mut runnables0, streams1) = Queue::new(streams0.remove(0), None).into_link().take();
+            let (mut runnables0, streams1) =
+                Queue::new(streams0.remove(0), None).into_link().take();
             runnables.append(&mut runnables0);
 
             let link = Link::new(runnables, streams1);
@@ -281,14 +280,17 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let (mut runnables0, mut streams0) = Process::new(immediate_stream(packets.clone()), Identity::new())
-                .into_link().take();
+            let (mut runnables0, mut streams0) =
+                Process::new(immediate_stream(packets.clone()), Identity::new())
+                    .into_link()
+                    .take();
 
             let (mut runnables1, mut streams1) =
                 Queue::new(streams0.remove(0), Some(10)).into_link().take();
 
-            let (mut runnables2, mut streams2) =
-                Process::new(streams1.remove(0), Identity::new()).into_link().take();
+            let (mut runnables2, mut streams2) = Process::new(streams1.remove(0), Identity::new())
+                .into_link()
+                .take();
 
             let (mut runnables3, streams3) =
                 Queue::new(streams2.remove(0), Some(10)).into_link().take();

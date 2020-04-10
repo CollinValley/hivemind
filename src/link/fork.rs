@@ -1,5 +1,5 @@
 use crate::link::utils::task_park::*;
-use crate::{link::QueueStream, Link, PacketStream, IntoLink};
+use crate::{link::QueueStream, IntoLink, Link, PacketStream};
 use crossbeam::atomic::AtomicCell;
 use crossbeam::crossbeam_channel;
 use crossbeam::crossbeam_channel::{Receiver, Sender};
@@ -51,7 +51,7 @@ impl<Packet: Send + Clone + 'static> IntoLink<Packet> for Fork<Packet> {
     fn into_link(self) -> Link<Packet> {
         Link {
             runnables: vec![Box::new(self.runnable)],
-            streams: self.streams
+            streams: self.streams,
         }
     }
 }
@@ -130,8 +130,7 @@ mod tests {
     fn no_input() {
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link =
-                Fork::<i32>::new(immediate_stream(vec![]), 1, None).into_link();
+            let link = Fork::<i32>::new(immediate_stream(vec![]), 1, None).into_link();
 
             test_link(link, None).await
         });
@@ -144,8 +143,7 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link = Fork::<i32>::new(immediate_stream(packets.clone()), 1, None)
-                .into_link();
+            let link = Fork::<i32>::new(immediate_stream(packets.clone()), 1, None).into_link();
 
             test_link(link, None).await
         });
@@ -158,8 +156,7 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link = Fork::<i32>::new(immediate_stream(packets.clone()), 2, None)
-                .into_link();
+            let link = Fork::<i32>::new(immediate_stream(packets.clone()), 2, None).into_link();
 
             test_link(link, None).await
         });
@@ -174,8 +171,7 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link = Fork::<i32>::new(immediate_stream(packets.clone()), 3, None)
-                .into_link();
+            let link = Fork::<i32>::new(immediate_stream(packets.clone()), 3, None).into_link();
 
             test_link(link, None).await
         });

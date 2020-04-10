@@ -1,7 +1,7 @@
 use crate::Classifier;
-use crate::{link::Classify, Link, PacketStream, IntoLink};
+use crate::{link::Classify, IntoLink, Link, PacketStream};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Even {}
 
 impl Even {
@@ -26,5 +26,6 @@ pub fn even_link(stream: PacketStream<i32>) -> Link<i32> {
         Box::new(|is_even| if is_even { Some(0) } else { Some(1) }),
         2,
         None,
-    ).into_link()
+    )
+    .into_link()
 }

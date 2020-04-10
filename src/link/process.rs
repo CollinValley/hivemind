@@ -1,4 +1,4 @@
-use crate::{Link, PacketStream, IntoLink, Processor};
+use crate::{IntoLink, Link, PacketStream, Processor};
 use futures::prelude::*;
 use futures::ready;
 use futures::task::{Context, Poll};
@@ -27,7 +27,7 @@ impl<P: Processor + Send + 'static> IntoLink<P::Output> for Process<P> {
     fn into_link(self) -> Link<P::Output> {
         Link {
             runnables: vec![],
-            streams: vec![self.stream]
+            streams: vec![self.stream],
         }
     }
 }
@@ -88,9 +88,9 @@ impl<P: Processor> Stream for ProcessStream<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::test::processor::{Drop, Identity, TransformFrom};
     use crate::utils::test::harness::{initialize_runtime, test_link};
     use crate::utils::test::packet_generators::{immediate_stream, PacketIntervalGenerator};
+    use crate::utils::test::processor::{Drop, Identity, TransformFrom};
     use core::time;
 
     #[test]
@@ -103,8 +103,7 @@ mod tests {
             // it contains no components that need to be added to
             // the runtime. This is a temporary requirement of this
             // interface.
-            let link = Process::new(immediate_stream(packets.clone()), Identity::new())
-                .into_link();
+            let link = Process::new(immediate_stream(packets.clone()), Identity::new()).into_link();
 
             test_link(link, None).await
         });
@@ -122,8 +121,7 @@ mod tests {
                 packets.clone().into_iter(),
             );
 
-            let link = Process::new(Box::new(packet_generator), Identity::new())
-                .into_link();
+            let link = Process::new(Box::new(packet_generator), Identity::new()).into_link();
 
             test_link(link, None).await
         });
@@ -141,7 +139,8 @@ mod tests {
             let link = Process::new(
                 Box::new(packet_generator),
                 TransformFrom::<char, u32>::new(),
-            ).into_link();
+            )
+            .into_link();
 
             test_link(link, None).await
         });
@@ -155,8 +154,7 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link =
-                Process::new(immediate_stream(packets), Drop::new()).into_link();
+            let link = Process::new(immediate_stream(packets), Drop::new()).into_link();
 
             test_link(link, None).await
         });

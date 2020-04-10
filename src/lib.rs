@@ -1,8 +1,6 @@
-
 pub mod link;
-
 pub mod utils;
-
+use crate::link::{Classify, Fork, Join, Process, Queue};
 
 pub trait Processor {
     type Input: Send + Clone;
@@ -28,8 +26,6 @@ pub trait IntoLink<Output: Send> {
     fn into_link(self) -> Link<Output>;
 }
 
-use crate::link::{Classify, Fork, Join, Process, Queue};
-
 pub struct Link<Packet: Send + Sized> {
     runnables: Vec<Runnable>,
     streams: Vec<PacketStream<Packet>>,
@@ -37,67 +33,85 @@ pub struct Link<Packet: Send + Sized> {
 
 #[allow(dead_code)]
 impl<Packet: Send + Sized + Clone + 'static> Link<Packet> {
+    // Create a new Link
     pub fn new(runnables: Vec<Runnable>, streams: Vec<PacketStream<Packet>>) -> Self {
         Link { runnables, streams }
     }
 
+    // Destructure Link, returning tuple of Runnables and Streams, which could
+    // be manually remade into new Links
     pub fn take(self) -> (Vec<Runnable>, Vec<PacketStream<Packet>>) {
         (self.runnables, self.streams)
     }
 
-    //Insert a queue link with a specific cap.
+    // Append a queue of size `cap` to each stream.
     pub fn queue(mut self, cap: Option<usize>) -> Self {
-        assert!(
-            self.streams.len() == 1,
-            "Link has more than one stream, needs to be joined."
-        );
-        let (mut runnables, streams) = Queue::new(self.streams.remove(0), cap).into_link().take();
+        let mut runnables = vec![];
+        let mut streams = vec![];
+        for stream in self.streams {
+            let (mut q_runnables,mut q_streams) = Queue::new(stream, cap).into_link().take();
+            runnables.append(&mut q_runnables);
+            streams.append(&mut q_streams);
+        }
         self.runnables.append(&mut runnables);
         Link::new(self.runnables, streams)
     }
 
-    //Combines all streams into one stream
-    pub fn join(mut self, cap: Option<usize>) -> Self {
+    // Join all streams in a link into one stream.
+    pub fn zip(mut self, cap: Option<usize>) -> Self {
         let (mut runnables, streams) = Join::new(self.streams, cap).into_link().take();
         self.runnables.append(&mut runnables);
         Link::new(self.runnables, streams)
     }
 
-    //Split stream to n copies of each stream
+    // Create n copies of each stream, yeilding num_streams * n total streams after
     pub fn fork(mut self, count: usize, cap: Option<usize>) -> Self {
-        assert!(
-            self.streams.len() == 1,
-            "Link has more than one stream, needs to be joined."
-        );
-        let (mut runnables, streams) =
-            Fork::new(self.streams.remove(0), count, cap).into_link().take();
+        let mut runnables = vec![];
+        let mut streams = vec![];
+        for stream in self.streams {
+            let (mut f_runnables, mut f_streams) = Fork::new(stream, count, cap)
+                .into_link()
+                .take();
+            runnables.append(&mut f_runnables);
+            streams.append(&mut f_streams);
+        }
         self.runnables.append(&mut runnables);
         Link::new(self.runnables, streams)
     }
+
+    // Split link with n streams into n links with 1 stream
+    pub fn split(mut self) -> Vec<Self> {
+        let mut links = vec![];
+        // First Link will carry forward all the runnables
+        links.push(Link::new(self.runnables, vec![self.streams.remove(0)]));
+        for stream in self.streams {
+            links.push(Link::new(vec![], vec![stream]));
+        }
+        links
+    }
+
 }
 
-trait ProcessFn<P: Processor + Send + 'static> {
+trait ProcessFn<P: Processor + Clone + Send + 'static> {
     fn process(self, processor: P) -> Link<P::Output>;
 }
 
-impl<P: Processor + Send + 'static> ProcessFn<P> for Link<P::Input> {
+impl<P: Processor + Send + Clone + 'static> ProcessFn<P> for Link<P::Input> {
+    // Append process to each stream in link
     fn process(mut self, p: P) -> Link<P::Output> {
-        assert!(
-            self.streams.len() == 1,
-            "Link has more than one stream, needs to be joined."
-        );
-        //Basically declare a process link here, use our current stream as input, and
-        // then convert it to new stream with a Process link, use this to create a new
-        // PrimativeLink we return. Carry forward any runnables.
-        // Is error to try to call on PrimativeLink with more than one stream? Maybe, or
-        // we could just run the process on all the streams.
-        let (mut runnables, streams) = Process::new(self.streams.remove(0), p).into_link().take();
+        let mut runnables = vec![];
+        let mut streams = vec![];
+        for stream in self.streams {
+            let (mut p_runnables, mut p_streams) = Process::new(stream, p.clone()).into_link().take();
+            runnables.append(&mut p_runnables);
+            streams.append(&mut p_streams);
+        }
         self.runnables.append(&mut runnables);
         Link::new(self.runnables, streams)
     }
 }
 
-trait ClassifyFn<C: Classifier + Send + 'static> {
+trait ClassifyFn<C: Classifier + Send + Clone + 'static> {
     fn classify(
         self,
         classifier: C,
@@ -107,7 +121,13 @@ trait ClassifyFn<C: Classifier + Send + 'static> {
     ) -> Link<C::Packet>;
 }
 
-impl<C: Classifier + Send + 'static> ClassifyFn<C> for Link<C::Packet> {
+impl<C: Classifier + Clone + Send + 'static> ClassifyFn<C> for Link<C::Packet> {
+    // This doesn't really fully work in parallel...weird interleavedness.
+    // Let's fully rework this.
+    // Remove dispatcher, class can just return portnum
+    // Make class also have a num_outputs() internal function
+    // If there are n possible classifications and m streams, return n Links each containing
+    // m streams.
     fn classify(
         mut self,
         classifier: C,
@@ -115,48 +135,45 @@ impl<C: Classifier + Send + 'static> ClassifyFn<C> for Link<C::Packet> {
         num_streams: usize,
         cap: Option<usize>,
     ) -> Link<C::Packet> {
-        assert!(
-            self.streams.len() == 1,
-            "Link has more than one stream, needs to be unloaded."
-        );
-        let (mut runnables0, streams) = Classify::new(
+        let (mut c_runnables,c_streams) = Classify::new(
             self.streams.remove(0),
             classifier,
             dispatcher,
             num_streams,
             cap,
         ).into_link().take();
-        self.runnables.append(&mut runnables0);
-        Link::new(self.runnables, streams)
+        self.runnables.append(&mut c_runnables);
+        Link::new(self.runnables, c_streams)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::test::{harness::{initialize_runtime, test_link},
-                           processor::Identity,
-                           packet_generators::immediate_stream,
-                           classifier::Even};
+    use crate::utils::test::{
+        classifier::Even,
+        harness::{initialize_runtime, test_link},
+        packet_generators::immediate_stream,
+        processor::Identity,
+    };
 
     #[test]
     fn smoke_router() {
-        let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9 , 10];
+        let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9, 10];
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link =
-                Link::new(vec![], vec![immediate_stream(packets.clone())])
-                    .process(Identity::new())
-                    .queue(Some(1))
-                    .fork(3, Some(10))
-                    .join(None)
-                    .classify(
-                        Even::new(),
-                        Box::new(|is_even| if is_even { Some(0) } else { Some(1) }),
-                        2,
-                        None
-                    );
+            let link = Link::new(vec![], vec![immediate_stream(packets.clone())])
+                .process(Identity::new())
+                .queue(Some(1))
+                .fork(3, Some(10))
+                .zip(None)
+                .classify(
+                    Even::new(),
+                    Box::new(|is_even| if is_even { Some(0) } else { Some(1) }),
+                    2,
+                    None,
+                );
             test_link(link, None).await
         });
         assert_eq!(results[0].len(), 21);
@@ -169,9 +186,7 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link =
-                Link::new(vec![], vec![immediate_stream(packets.clone())])
-                    .fork(3, Some(10));
+            let link = Link::new(vec![], vec![immediate_stream(packets.clone())]).fork(3, Some(10));
             test_link(link, None).await
         });
         assert_eq!(results[0], packets);
@@ -180,19 +195,18 @@ mod tests {
     }
 
     #[test]
-    fn join_chain() {
+    fn zip_chain() {
         let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9];
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link =
-                Link::new(vec![], vec![immediate_stream(packets.clone())])
-                    .fork(3, Some(10))
-                    .join(None);
+            let link = Link::new(vec![], vec![immediate_stream(packets.clone())])
+                .fork(3, Some(10))
+                .zip(None);
             test_link(link, None).await
         });
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].len(), packets.len()* 3);
+        assert_eq!(results[0].len(), packets.len() * 3);
     }
 
     #[test]
@@ -201,14 +215,12 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link =
-                Link::new(vec![], vec![immediate_stream(packets.clone())])
-                    .classify(
-                        Even::new(),
-                        Box::new(|is_even| if is_even { Some(0) } else { Some(1) }),
-                        2,
-                        None
-                    );
+            let link = Link::new(vec![], vec![immediate_stream(packets.clone())]).classify(
+                Even::new(),
+                Box::new(|is_even| if is_even { Some(0) } else { Some(1) }),
+                2,
+                None,
+            );
             test_link(link, None).await
         });
         assert_eq!(results.len(), 2);

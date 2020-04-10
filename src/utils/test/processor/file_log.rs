@@ -1,5 +1,5 @@
-use crate::Processor;
 use crate::utils::test::processor::Log;
+use crate::Processor;
 use std::fmt::Debug;
 use std::fs::File;
 use std::marker::PhantomData;

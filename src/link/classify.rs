@@ -1,5 +1,5 @@
-use crate::Classifier;
 use crate::link::utils::task_park::*;
+use crate::Classifier;
 use crate::{link::QueueStream, IntoLink, Link, PacketStream};
 use crossbeam::atomic::AtomicCell;
 use crossbeam::crossbeam_channel;
@@ -57,7 +57,7 @@ impl<C: Classifier + Send + 'static> IntoLink<C::Packet> for Classify<C> {
     fn into_link(self) -> Link<C::Packet> {
         Link {
             runnables: vec![Box::new(self.runnable)],
-            streams: self.streams
+            streams: self.streams,
         }
     }
 }
@@ -146,10 +146,10 @@ impl<'a, C: Classifier> Future for ClassifyRunnable<'a, C> {
 
 #[cfg(test)]
 mod tests {
-    use crate::Link;
     use crate::utils::test::classifier::{even_link, fizz_buzz_link};
     use crate::utils::test::harness::{initialize_runtime, test_link};
     use crate::utils::test::packet_generators::{immediate_stream, PacketIntervalGenerator};
+    use crate::Link;
     use core::time;
 
     #[test]

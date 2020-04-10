@@ -1,5 +1,5 @@
 use crate::link::utils::task_park::*;
-use crate::{Link, PacketStream, IntoLink, Runnable};
+use crate::{IntoLink, Link, PacketStream, Runnable};
 use crossbeam::atomic::AtomicCell;
 use crossbeam::crossbeam_channel;
 use crossbeam::crossbeam_channel::{Receiver, Sender};
@@ -54,7 +54,7 @@ impl<Packet: Send + Sized + 'static> IntoLink<Packet> for Join<Packet> {
     fn into_link(self) -> Link<Packet> {
         Link {
             runnables: self.runnables,
-            streams: vec![self.stream]
+            streams: vec![self.stream],
         }
     }
 }
@@ -330,8 +330,7 @@ mod tests {
                 immediate_stream::<Vec<i32>>(vec![]),
             ];
 
-            let link =
-                Join::new(inputs, None).into_link();
+            let link = Join::new(inputs, None).into_link();
 
             test_link(link, None).await
         });
