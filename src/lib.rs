@@ -1,16 +1,16 @@
 pub mod link;
 pub mod utils;
-use crate::link::DoClassify;
+use crate::link::{DoClassify, ProcessStream};
 
 pub trait Processor {
-    type Input: Send + Clone;
-    type Output: Send + Clone;
+    type Input: Send;
+    type Output: Send;
 
     fn process(&mut self, packet: Self::Input) -> Option<Self::Output>;
 }
 
 pub trait Classifier {
-    type Packet: Send + Clone + 'static;
+    type Packet: Send + 'static;
     const NUM_PORTS: usize;
 
     fn classify(&self, packet: &Self::Packet) -> Option<usize>;
@@ -30,7 +30,7 @@ pub struct Link<Packet: Send + Sized> {
 }
 
 #[allow(dead_code)]
-impl<Packet: Send + Sized + Clone + 'static> Link<Packet> {
+impl<Packet: Send + Sized + 'static> Link<Packet> {
     // Create a new Link
     pub fn new(runnables: Vec<Runnable>, streams: Vec<PacketStream<Packet>>) -> Self {
         Link { runnables, streams }
@@ -62,19 +62,6 @@ impl<Packet: Send + Sized + Clone + 'static> Link<Packet> {
         Link::new(self.runnables, streams)
     }
 
-    // Create n copies of each stream, yeilding num_streams * n total streams after
-    pub fn fork(mut self, count: usize, cap: Option<usize>) -> Self {
-        let mut runnables = vec![];
-        let mut streams = vec![];
-        for stream in self.streams {
-            let (mut f_runnables, mut f_streams) = Link::do_fork(stream, count, cap).take();
-            runnables.append(&mut f_runnables);
-            streams.append(&mut f_streams);
-        }
-        self.runnables.append(&mut runnables);
-        Link::new(self.runnables, streams)
-    }
-
     // Split link with n streams into n links with 1 stream
     pub fn split(mut self) -> Vec<Self> {
         let mut links = vec![];
@@ -87,12 +74,26 @@ impl<Packet: Send + Sized + Clone + 'static> Link<Packet> {
     }
 }
 
+impl<Packet: Send + Sized + Clone + 'static> Link<Packet> {
+    // Create n copies of each stream, yielding num_streams * n total streams after
+    pub fn fork(mut self, count: usize, cap: Option<usize>) -> Self {
+        let mut runnables = vec![];
+        let mut streams = vec![];
+        for stream in self.streams {
+            let (mut f_runnables, mut f_streams) = Link::do_fork(stream, count, cap).take();
+            runnables.append(&mut f_runnables);
+            streams.append(&mut f_streams);
+        }
+        self.runnables.append(&mut runnables);
+        Link::new(self.runnables, streams)
+    }
+}
+
 pub(crate) trait ProcessFn<P: Processor + Clone + Send + 'static> {
     fn process(self, processor: P) -> Link<P::Output>;
 }
 
-use crate::link::ProcessStream;
-impl<P: Processor + Send + Clone + 'static> ProcessFn<P> for Link<P::Input> {
+impl<P: Processor + Clone + Send + 'static> ProcessFn<P> for Link<P::Input> {
     // Append process to each stream in link
     fn process(self, p: P) -> Link<P::Output> {
         let mut streams: Vec<PacketStream<P::Output>> = vec![];
@@ -106,21 +107,21 @@ impl<P: Processor + Send + Clone + 'static> ProcessFn<P> for Link<P::Input> {
     }
 }
 
-trait ClassifyFn<C: Classifier + Send + Clone + 'static> {
-    fn classify(self, classifier: C, cap: Option<usize>) -> Link<C::Packet>;
+trait ClassifyFn<C: Classifier + Clone + Send + 'static> {
+    fn classify(self, classifier: C, cap: Option<usize>) -> Vec<Link<C::Packet>>;
 }
 
 impl<C: Classifier + Clone + Send + 'static> ClassifyFn<C> for Link<C::Packet> {
-    // This doesn't really fully work in parallel...weird interleavedness.
-    // If there are n possible classifications and m streams, return n Links each containing
-    // m streams.
-    fn classify(mut self, classifier: C, cap: Option<usize>) -> Link<C::Packet> {
-        //Parallelism to come
-        assert!(self.streams.len() == 1);
-        let (mut c_runnables, c_streams) =
-            DoClassify::do_classify(self.streams.remove(0), classifier, cap).take();
-        self.runnables.append(&mut c_runnables);
-        Link::new(self.runnables, c_streams)
+    fn classify(mut self, classifier: C, cap: Option<usize>) -> Vec<Link<C::Packet>> {
+        let mut links = vec![];
+        //Take and classify each input stream
+        for stream in self.streams {
+            let (mut runnables, streams) =
+                DoClassify::do_classify(stream, classifier.clone(), cap).take();
+            runnables.append(&mut self.runnables);
+            links.push(Link::new(runnables, streams));
+        }
+        links
     }
 }
 
@@ -140,13 +141,13 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link = Link::new(vec![], vec![immediate_stream(packets.clone())])
+            let mut links = Link::new(vec![], vec![immediate_stream(packets.clone())])
                 .process(Identity::new())
                 .queue(Some(1))
                 .fork(3, Some(10))
                 .zip(None)
                 .classify(Even::new(), None);
-            test_link(link, None).await
+            test_link(links.remove(0), None).await
         });
         assert_eq!(results[0].len(), 21);
         assert_eq!(results[1].len(), 18);
@@ -187,9 +188,9 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link = Link::new(vec![], vec![immediate_stream(packets.clone())])
+            let mut links = Link::new(vec![], vec![immediate_stream(packets.clone())])
                 .classify(Even::new(), None);
-            test_link(link, None).await
+            test_link(links.remove(0), None).await
         });
         assert_eq!(results.len(), 2);
         assert_eq!(results[0], vec![0, 2, 420, 4, 6, 8]);
