@@ -1,6 +1,6 @@
 pub mod link;
 pub mod utils;
-use crate::link::{Classify, Process, Queue};
+use crate::link::{Classify, Process};
 
 pub trait Processor {
     type Input: Send + Clone;
@@ -49,7 +49,7 @@ impl<Packet: Send + Sized + Clone + 'static> Link<Packet> {
         let mut runnables = vec![];
         let mut streams = vec![];
         for stream in self.streams {
-            let (mut q_runnables, mut q_streams) = Queue::new(stream, cap).into_link().take();
+            let (mut q_runnables, mut q_streams) = Link::do_queue(stream, cap).take();
             runnables.append(&mut q_runnables);
             streams.append(&mut q_streams);
         }

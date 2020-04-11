@@ -1,5 +1,5 @@
 use crate::link::utils::task_park::*;
-use crate::{IntoLink, Link, PacketStream, Runnable};
+use crate::{Link, PacketStream};
 use crossbeam::atomic::AtomicCell;
 use crossbeam::crossbeam_channel;
 use crossbeam::crossbeam_channel::{Receiver, Sender, TryRecvError};
@@ -9,15 +9,8 @@ use futures::task::{Context, Poll};
 use std::pin::Pin;
 use std::sync::Arc;
 
-/// A link used to create queues, buffers, or Task boundries. Packets may be
-/// transformed with a Processor prior to being enqueued.
-pub struct Queue<Packet: Send + Sized> {
-    runnables: Vec<Runnable>,
-    stream: PacketStream<Packet>,
-}
-
-impl<Packet: Send + Sized + 'static> Queue<Packet> {
-    pub fn new(input: PacketStream<Packet>, cap: Option<usize>) -> Self {
+impl<Packet: Send + Sized + 'static> Link<Packet> {
+    pub(crate) fn do_queue(input: PacketStream<Packet>, cap: Option<usize>) -> Self {
         let (sender, reciever) = match cap {
             None => crossbeam_channel::unbounded::<Option<Packet>>(),
             Some(capacity) => crossbeam_channel::bounded::<Option<Packet>>(capacity),
@@ -29,30 +22,21 @@ impl<Packet: Send + Sized + 'static> Queue<Packet> {
         let runnable = QueueRunnable::new(input, sender, Arc::clone(&task_park));
         let stream = QueueStream::new(reciever, task_park);
 
-        Queue {
-            runnables: vec![Box::new(runnable)],
-            stream: Box::new(stream),
-        }
-    }
-}
-
-impl<Packet: Send + Sized + 'static> IntoLink<Packet> for Queue<Packet> {
-    fn into_link(self) -> Link<Packet> {
         Link {
-            runnables: self.runnables,
-            streams: vec![self.stream],
+            runnables: vec![Box::new(runnable)],
+            streams: vec![Box::new(stream)],
         }
     }
 }
 
-/// TODO: Fixup docs
-/// The QueueIngressor is responsible for polling its input stream,
-/// processing them using the `processor`s process function, and pushing the
-/// output packet onto the to_egressor queue. It does work in batches, so it
-/// will continue to pull packets as long as it can make forward progess,
-/// after which it will return NotReady to sleep. This is handed to, and is
-/// polled by the runtime.
-pub struct QueueRunnable<Packet: Sized> {
+// TODO: Fixup docs
+// The QueueIngressor is responsible for polling its input stream,
+// processing them using the `processor`s process function, and pushing the
+// output packet onto the to_egressor queue. It does work in batches, so it
+// will continue to pull packets as long as it can make forward progess,
+// after which it will return NotReady to sleep. This is handed to, and is
+// polled by the runtime.
+pub(crate) struct QueueRunnable<Packet: Sized> {
     input_stream: PacketStream<Packet>,
     to_egressor: Sender<Option<Packet>>,
     task_park: Arc<AtomicCell<TaskParkState>>,
@@ -77,30 +61,30 @@ impl<Packet: Send + Sized> Unpin for QueueRunnable<Packet> {}
 impl<Packet: Send + Sized> Future for QueueRunnable<Packet> {
     type Output = ();
 
-    /// Implement Poll for Future for QueueIngressor
-    ///
-    /// This function continues to process
-    /// packets off it's input queue until it reaches a point where it can not
-    /// make forward progress. There are several cases:
-    /// ###
-    /// #1 The to_egressor queue is full, we wake the Egressor that we need
-    /// awaking when there is work to do, and go to sleep by returning `Async::NotReady`.
-    ///
-    /// #2 The input_stream returns a NotReady, we sleep, with the assumption
-    /// that whomever produced the NotReady will awaken the task in the Future.
-    ///
-    /// #3 We get a Ready(None), in which case we push a None onto the to_Egressor
-    /// queue and then return Ready(()), which means we enter tear-down, since there
-    /// is no further work to complete.
-    ///
-    /// #4 If our upstream `PacketStream` has a packet for us, we pass it to our `processor`
-    /// for `process`ing. Most of the time, it will yield a `Some(output_packet)` that has
-    /// been transformed in some way. We pass that on to our egress channel and wake
-    /// our `Egressor` that it has work to do, and continue polling our upstream `PacketStream`.
-    ///
-    /// #5 `processor`s may also choose to "drop" packets by returning `None`, so we do nothing
-    /// and poll our upstream `PacketStream` again.
-    ///
+    // Implement Poll for Future for QueueIngressor
+    //
+    // This function continues to process
+    // packets off it's input queue until it reaches a point where it can not
+    // make forward progress. There are several cases:
+    // ###
+    // #1 The to_egressor queue is full, we wake the Egressor that we need
+    // awaking when there is work to do, and go to sleep by returning `Async::NotReady`.
+    //
+    // #2 The input_stream returns a NotReady, we sleep, with the assumption
+    // that whomever produced the NotReady will awaken the task in the Future.
+    //
+    // #3 We get a Ready(None), in which case we push a None onto the to_Egressor
+    // queue and then return Ready(()), which means we enter tear-down, since there
+    // is no further work to complete.
+    //
+    // #4 If our upstream `PacketStream` has a packet for us, we pass it to our `processor`
+    // for `process`ing. Most of the time, it will yield a `Some(output_packet)` that has
+    // been transformed in some way. We pass that on to our egress channel and wake
+    // our `Egressor` that it has work to do, and continue polling our upstream `PacketStream`.
+    //
+    // #5 `processor`s may also choose to "drop" packets by returning `None`, so we do nothing
+    // and poll our upstream `PacketStream` again.
+    //
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         loop {
             if self.to_egressor.is_full() {
@@ -127,12 +111,12 @@ impl<Packet: Send + Sized> Future for QueueRunnable<Packet> {
     }
 }
 
-/// TODO: Docs fixup
-/// The Egressor side of the QueueLink is responsible to converting the
-/// output queue of processed packets, which is a crossbeam channel, to a
-/// Stream that can be polled for packets. It ends up being owned by the
-/// processor which is polling for packets.
-pub struct QueueStream<Packet: Sized> {
+// TODO: Docs fixup
+// The Egressor side of the QueueLink is responsible to converting the
+// output queue of processed packets, which is a crossbeam channel, to a
+// Stream that can be polled for packets. It ends up being owned by the
+// processor which is polling for packets.
+pub(crate) struct QueueStream<Packet: Sized> {
     from_ingressor: Receiver<Option<Packet>>,
     task_park: Arc<AtomicCell<TaskParkState>>,
 }
@@ -154,24 +138,24 @@ impl<Packet: Sized> Unpin for QueueStream<Packet> {}
 impl<Packet: Sized> Stream for QueueStream<Packet> {
     type Item = Packet;
 
-    /// Implement Poll for Stream for QueueEgressor
-    ///
-    /// This function, tries to retrieve a packet off the `from_ingressor`
-    /// channel, there are four cases:
-    /// ###
-    /// #1 Ok(Some(Packet)): Got a packet. If the Ingressor needs (likely due to
-    /// an until now full channel) to be awoken, wake them. Return the Async::Ready(Option(Packet))
-    ///
-    /// #2 Ok(None): this means that the Ingressor is in tear-down, and we
-    /// will no longer be receivig packets. Return Async::Ready(None) to forward propagate teardown
-    ///
-    /// #3 Err(TryRecvError::Empty): Packet queue is empty, await the Ingressor to awaken us with more
-    /// work, by returning Async::NotReady to signal to runtime to sleep this task.
-    ///
-    /// #4 Err(TryRecvError::Disconnected): Ingressor is in teardown and has dropped its side of the
-    /// from_ingressor channel; we will no longer receive packets. Return Async::Ready(None) to forward
-    /// propagate teardown.
-    /// ###
+    // Implement Poll for Stream for QueueEgressor
+    //
+    // This function, tries to retrieve a packet off the `from_ingressor`
+    // channel, there are four cases:
+    // ###
+    // #1 Ok(Some(Packet)): Got a packet. If the Ingressor needs (likely due to
+    // an until now full channel) to be awoken, wake them. Return the Async::Ready(Option(Packet))
+    //
+    // #2 Ok(None): this means that the Ingressor is in tear-down, and we
+    // will no longer be receivig packets. Return Async::Ready(None) to forward propagate teardown
+    //
+    // #3 Err(TryRecvError::Empty): Packet queue is empty, await the Ingressor to awaken us with more
+    // work, by returning Async::NotReady to signal to runtime to sleep this task.
+    //
+    // #4 Err(TryRecvError::Disconnected): Ingressor is in teardown and has dropped its side of the
+    // from_ingressor channel; we will no longer receive packets. Return Async::Ready(None) to forward
+    // propagate teardown.
+    // ###
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         match self.from_ingressor.try_recv() {
             Ok(Some(packet)) => {
@@ -198,6 +182,7 @@ mod tests {
     use crate::utils::test::harness::{initialize_runtime, test_link};
     use crate::utils::test::packet_generators::{immediate_stream, PacketIntervalGenerator};
     use crate::utils::test::processor::Identity;
+    use crate::IntoLink;
     use core::time;
     use rand::{thread_rng, Rng};
 
@@ -207,7 +192,7 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link = Queue::new(immediate_stream(packets.clone()), Some(10)).into_link();
+            let link = Link::do_queue(immediate_stream(packets.clone()), Some(10));
 
             test_link(link, None).await
         });
@@ -221,7 +206,7 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link = Queue::new(immediate_stream(0..stream_len), Some(10)).into_link();
+            let link = Link::do_queue(immediate_stream(0..stream_len), Some(10));
 
             test_link(link, None).await
         });
@@ -234,7 +219,7 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link = Queue::new(immediate_stream(packets.clone()), Some(1)).into_link();
+            let link = Link::do_queue(immediate_stream(packets.clone()), Some(1));
 
             test_link(link, None).await
         });
@@ -246,7 +231,7 @@ mod tests {
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
             let packets: Vec<i32> = vec![];
-            let link = Queue::new(immediate_stream(packets.clone()), Some(10)).into_link();
+            let link = Link::do_queue(immediate_stream(packets.clone()), Some(10));
 
             test_link(link, None).await
         });
@@ -260,12 +245,9 @@ mod tests {
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
             let (mut runnables, mut streams0) =
-                Queue::new(immediate_stream(packets.clone()), Some(10))
-                    .into_link()
-                    .take();
+                Link::do_queue(immediate_stream(packets.clone()), Some(10)).take();
 
-            let (mut runnables0, streams1) =
-                Queue::new(streams0.remove(0), None).into_link().take();
+            let (mut runnables0, streams1) = Link::do_queue(streams0.remove(0), None).take();
             runnables.append(&mut runnables0);
 
             let link = Link::new(runnables, streams1);
@@ -286,14 +268,13 @@ mod tests {
                     .take();
 
             let (mut runnables1, mut streams1) =
-                Queue::new(streams0.remove(0), Some(10)).into_link().take();
+                Link::do_queue(streams0.remove(0), Some(10)).take();
 
             let (mut runnables2, mut streams2) = Process::new(streams1.remove(0), Identity::new())
                 .into_link()
                 .take();
 
-            let (mut runnables3, streams3) =
-                Queue::new(streams2.remove(0), Some(10)).into_link().take();
+            let (mut runnables3, streams3) = Link::do_queue(streams2.remove(0), Some(10)).take();
             runnables0.append(&mut runnables1);
             runnables0.append(&mut runnables2);
             runnables0.append(&mut runnables3);
@@ -315,7 +296,7 @@ mod tests {
                 packets.clone().into_iter(),
             );
 
-            let link = Queue::new(Box::new(input), None).into_link();
+            let link = Link::do_queue(Box::new(input), None);
             test_link(link, None).await
         });
         assert_eq!(results[0], packets);

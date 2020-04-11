@@ -11,7 +11,7 @@ pub(crate) use self::process::Process;
 /// different threads, or even different cores. Before packets are placed into the queue to be output, they are run
 /// through the processor defined process function, often performing some sort of transformation.
 mod queue;
-pub(crate) use self::queue::{Queue, QueueStream};
+pub(crate) use self::queue::QueueStream;
 
 /// Uses processor defined classifications to sort input into different streams, a good example would
 /// be a flow that splits IPv4 and IPv6 packets, asynchronous. Packets are either dispatched to a
