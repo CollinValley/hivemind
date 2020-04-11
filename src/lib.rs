@@ -11,12 +11,10 @@ pub trait Processor {
 
 pub trait Classifier {
     type Packet: Send + Clone + 'static;
-    type Class: Sized;
+    const NUM_PORTS: usize;
 
-    fn classify(&self, packet: &Self::Packet) -> Self::Class;
+    fn classify(&self, packet: &Self::Packet) -> Option<usize>;
 }
-
-pub type Dispatcher<'a, Class> = dyn Fn(Class) -> Option<usize> + Send + Sync + 'a;
 
 pub type PacketStream<T> = Box<dyn futures::Stream<Item = T> + Send + Unpin>;
 
@@ -96,28 +94,20 @@ pub(crate) trait ProcessFn<P: Processor + Clone + Send + 'static> {
 use crate::link::ProcessStream;
 impl<P: Processor + Send + Clone + 'static> ProcessFn<P> for Link<P::Input> {
     // Append process to each stream in link
-    fn process(mut self, p: P) -> Link<P::Output> {
-        let mut runnables = vec![];
+    fn process(self, p: P) -> Link<P::Output> {
         let mut streams: Vec<PacketStream<P::Output>> = vec![];
         for stream in self.streams {
-            // Little weird, still, process doesent create new runnables, so just
+            // Little weird, still, process doesn't create new runnables, so just
             // manipulate the stream directly.
             let p_stream = ProcessStream::new(stream, p.clone());
             streams.push(Box::new(p_stream));
         }
-        self.runnables.append(&mut runnables);
         Link::new(self.runnables, streams)
     }
 }
 
 trait ClassifyFn<C: Classifier + Send + Clone + 'static> {
-    fn classify(
-        self,
-        classifier: C,
-        dispatcher: Box<Dispatcher<'static, C::Class>>,
-        num_streams: usize,
-        cap: Option<usize>,
-    ) -> Link<C::Packet>;
+    fn classify(self, classifier: C, cap: Option<usize>) -> Link<C::Packet>;
 }
 
 impl<C: Classifier + Clone + Send + 'static> ClassifyFn<C> for Link<C::Packet> {
@@ -127,22 +117,10 @@ impl<C: Classifier + Clone + Send + 'static> ClassifyFn<C> for Link<C::Packet> {
     // Make class also have a num_outputs() internal function
     // If there are n possible classifications and m streams, return n Links each containing
     // m streams.
-    fn classify(
-        mut self,
-        classifier: C,
-        dispatcher: Box<Dispatcher<'static, C::Class>>,
-        num_streams: usize,
-        cap: Option<usize>,
-    ) -> Link<C::Packet> {
-        let (mut c_runnables, c_streams) = Classify::new(
-            self.streams.remove(0),
-            classifier,
-            dispatcher,
-            num_streams,
-            cap,
-        )
-        .into_link()
-        .take();
+    fn classify(mut self, classifier: C, cap: Option<usize>) -> Link<C::Packet> {
+        let (mut c_runnables, c_streams) = Classify::new(self.streams.remove(0), classifier, cap)
+            .into_link()
+            .take();
         self.runnables.append(&mut c_runnables);
         Link::new(self.runnables, c_streams)
     }
@@ -169,12 +147,7 @@ mod tests {
                 .queue(Some(1))
                 .fork(3, Some(10))
                 .zip(None)
-                .classify(
-                    Even::new(),
-                    Box::new(|is_even| if is_even { Some(0) } else { Some(1) }),
-                    2,
-                    None,
-                );
+                .classify(Even::new(), None);
             test_link(link, None).await
         });
         assert_eq!(results[0].len(), 21);
@@ -216,12 +189,8 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link = Link::new(vec![], vec![immediate_stream(packets.clone())]).classify(
-                Even::new(),
-                Box::new(|is_even| if is_even { Some(0) } else { Some(1) }),
-                2,
-                None,
-            );
+            let link = Link::new(vec![], vec![immediate_stream(packets.clone())])
+                .classify(Even::new(), None);
             test_link(link, None).await
         });
         assert_eq!(results.len(), 2);

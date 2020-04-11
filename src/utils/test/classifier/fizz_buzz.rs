@@ -19,33 +19,21 @@ impl FizzBuzz {
 
 impl Classifier for FizzBuzz {
     type Packet = i32;
-    type Class = FizzBuzzVariant;
+    const NUM_PORTS: usize = 4;
 
-    fn classify(&self, packet: &Self::Packet) -> Self::Class {
+    fn classify(&self, packet: &Self::Packet) -> Option<usize> {
         if packet % 3 == 0 && packet % 5 == 0 {
-            FizzBuzzVariant::FizzBuzz
+            Some(0)
         } else if packet % 3 == 0 {
-            FizzBuzzVariant::Fizz
+            Some(1)
         } else if packet % 5 == 0 {
-            FizzBuzzVariant::Buzz
+            Some(2)
         } else {
-            FizzBuzzVariant::None
+            Some(3)
         }
     }
 }
 
 pub fn fizz_buzz_link(stream: PacketStream<i32>) -> Link<i32> {
-    Classify::new(
-        stream,
-        FizzBuzz::new(),
-        Box::new(|fb| match fb {
-            FizzBuzzVariant::FizzBuzz => Some(0),
-            FizzBuzzVariant::Fizz => Some(1),
-            FizzBuzzVariant::Buzz => Some(2),
-            FizzBuzzVariant::None => Some(3),
-        }),
-        4,
-        None,
-    )
-    .into_link()
+    Classify::new(stream, FizzBuzz::new(), None).into_link()
 }

@@ -12,20 +12,18 @@ impl Even {
 
 impl Classifier for Even {
     type Packet = i32;
-    type Class = bool;
+    const NUM_PORTS: usize = 2;
 
-    fn classify(&self, packet: &Self::Packet) -> Self::Class {
-        packet % 2 == 0
+    fn classify(&self, packet: &Self::Packet) -> Option<usize> {
+        //hilarious.  I'm too lazy to change this out to a usize packet type
+        match packet % 2 {
+            0 => Some(0),
+            1 => Some(1),
+            _ => None,
+        }
     }
 }
 
 pub fn even_link(stream: PacketStream<i32>) -> Link<i32> {
-    Classify::new(
-        stream,
-        Even::new(),
-        Box::new(|is_even| if is_even { Some(0) } else { Some(1) }),
-        2,
-        None,
-    )
-    .into_link()
+    Classify::new(stream, Even::new(), None).into_link()
 }

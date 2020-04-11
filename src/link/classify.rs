@@ -11,27 +11,19 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::stream::Stream;
 
-pub type Dispatcher<'a, Class> = dyn Fn(Class) -> Option<usize> + Send + Sync + 'a;
-
 pub struct Classify<C: Classifier + 'static> {
-    runnable: ClassifyRunnable<'static, C>,
+    runnable: ClassifyRunnable<C>,
     streams: Vec<PacketStream<C::Packet>>,
 }
 
 impl<C: Classifier + 'static> Classify<C> {
-    pub fn new(
-        input: PacketStream<C::Packet>,
-        classifier: C,
-        dispatcher: Box<Dispatcher<'static, C::Class>>,
-        num_streams: usize,
-        cap: Option<usize>,
-    ) -> Self {
+    pub fn new(input: PacketStream<C::Packet>, classifier: C, cap: Option<usize>) -> Self {
         let mut senders: Vec<Sender<Option<C::Packet>>> = Vec::new();
-        let mut streams: Vec<PacketStream<C::Packet>> = Vec::new();
         let mut receivers: Vec<Receiver<Option<C::Packet>>> = Vec::new();
+        let mut streams: Vec<PacketStream<C::Packet>> = Vec::new();
         let mut task_parks: Vec<Arc<AtomicCell<TaskParkState>>> = Vec::new();
 
-        for _ in 0..num_streams {
+        for _ in 0..C::NUM_PORTS {
             let (sender, receiver) = match cap {
                 None => crossbeam_channel::unbounded::<Option<C::Packet>>(),
                 Some(capacity) => crossbeam_channel::bounded::<Option<C::Packet>>(capacity),
@@ -44,7 +36,7 @@ impl<C: Classifier + 'static> Classify<C> {
             receivers.push(receiver);
             task_parks.push(task_park);
         }
-        let runnable = ClassifyRunnable::new(input, dispatcher, senders, classifier, task_parks);
+        let runnable = ClassifyRunnable::new(input, senders, classifier, task_parks);
 
         Classify { runnable, streams }
     }
@@ -59,27 +51,24 @@ impl<C: Classifier + Send + 'static> IntoLink<C::Packet> for Classify<C> {
     }
 }
 
-pub struct ClassifyRunnable<'a, C: Classifier> {
+pub struct ClassifyRunnable<C: Classifier> {
     input_stream: PacketStream<C::Packet>,
-    dispatcher: Box<Dispatcher<'a, C::Class>>,
     to_egressors: Vec<Sender<Option<C::Packet>>>,
     classifier: C,
     task_parks: Vec<Arc<AtomicCell<TaskParkState>>>,
 }
 
-impl<'a, C: Classifier> Unpin for ClassifyRunnable<'a, C> {}
+impl<C: Classifier> Unpin for ClassifyRunnable<C> {}
 
-impl<'a, C: Classifier> ClassifyRunnable<'a, C> {
+impl<C: Classifier> ClassifyRunnable<C> {
     fn new(
         input_stream: PacketStream<C::Packet>,
-        dispatcher: Box<Dispatcher<'a, C::Class>>,
         to_egressors: Vec<Sender<Option<C::Packet>>>,
         classifier: C,
         task_parks: Vec<Arc<AtomicCell<TaskParkState>>>,
     ) -> Self {
         ClassifyRunnable {
             input_stream,
-            dispatcher,
             to_egressors,
             classifier,
             task_parks,
@@ -87,7 +76,7 @@ impl<'a, C: Classifier> ClassifyRunnable<'a, C> {
     }
 }
 
-impl<'a, C: Classifier> Future for ClassifyRunnable<'a, C> {
+impl<C: Classifier> Future for ClassifyRunnable<C> {
     type Output = ();
 
     /// Same logic as QueueEgressor, except if any of the channels are full we
@@ -121,11 +110,12 @@ impl<'a, C: Classifier> Future for ClassifyRunnable<'a, C> {
                     return Poll::Ready(());
                 }
                 Some(packet) => {
-                    let class = ingressor.classifier.classify(&packet);
-                    // If we get Some(port) back, send the packet; else we drop it.
-                    if let Some(port) = (ingressor.dispatcher)(class) {
+                    if let Some(port) = ingressor.classifier.classify(&packet) {
                         if port >= ingressor.to_egressors.len() {
-                            panic!("Tried to access invalid port: {}", port);
+                            panic!("Classifier used port outside of its listed range: Port {}, NumOutputs{}",
+                                   port,
+                                   C::NUM_PORTS
+                            );
                         }
                         if let Err(err) = ingressor.to_egressors[port].try_send(Some(packet)) {
                             panic!(
