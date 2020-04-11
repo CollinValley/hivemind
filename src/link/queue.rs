@@ -178,11 +178,9 @@ impl<Packet: Sized> Stream for QueueStream<Packet> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::link::Process;
     use crate::utils::test::harness::{initialize_runtime, test_link};
     use crate::utils::test::packet_generators::{immediate_stream, PacketIntervalGenerator};
     use crate::utils::test::processor::Identity;
-    use crate::IntoLink;
     use core::time;
     use rand::{thread_rng, Rng};
 
@@ -256,6 +254,7 @@ mod tests {
         assert_eq!(results[0], packets);
     }
 
+    use crate::ProcessFn;
     #[test]
     fn series_of_process_and_queue_links() {
         let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9];
@@ -263,16 +262,14 @@ mod tests {
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
             let (mut runnables0, mut streams0) =
-                Process::new(immediate_stream(packets.clone()), Identity::new())
-                    .into_link()
+                Link::new(vec![], vec![immediate_stream(packets.clone())])
+                    .process(Identity::new())
                     .take();
 
-            let (mut runnables1, mut streams1) =
-                Link::do_queue(streams0.remove(0), Some(10)).take();
+            let (mut runnables1, streams1) = Link::do_queue(streams0.remove(0), Some(10)).take();
 
-            let (mut runnables2, mut streams2) = Process::new(streams1.remove(0), Identity::new())
-                .into_link()
-                .take();
+            let (mut runnables2, mut streams2) =
+                Link::new(vec![], streams1).process(Identity::new()).take();
 
             let (mut runnables3, streams3) = Link::do_queue(streams2.remove(0), Some(10)).take();
             runnables0.append(&mut runnables1);

@@ -3,7 +3,7 @@
 /// so all packets that enter either immediatly leave or are dropped, as dictated by the processor. Both sides of
 /// this link are on the same thread, hence the label synchronous.
 mod process;
-pub(crate) use self::process::Process;
+pub(crate) use self::process::ProcessStream;
 
 /// Input packets are placed into an intermediate channel that are pulled from the output asynchronously.
 /// Asynchronous in that a packets may enter and leave this link asynchronously to each other.  This link is

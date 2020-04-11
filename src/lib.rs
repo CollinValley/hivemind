@@ -1,6 +1,6 @@
 pub mod link;
 pub mod utils;
-use crate::link::{Classify, Process};
+use crate::link::Classify;
 
 pub trait Processor {
     type Input: Send + Clone;
@@ -89,20 +89,21 @@ impl<Packet: Send + Sized + Clone + 'static> Link<Packet> {
     }
 }
 
-trait ProcessFn<P: Processor + Clone + Send + 'static> {
+pub(crate) trait ProcessFn<P: Processor + Clone + Send + 'static> {
     fn process(self, processor: P) -> Link<P::Output>;
 }
 
+use crate::link::ProcessStream;
 impl<P: Processor + Send + Clone + 'static> ProcessFn<P> for Link<P::Input> {
     // Append process to each stream in link
     fn process(mut self, p: P) -> Link<P::Output> {
         let mut runnables = vec![];
-        let mut streams = vec![];
+        let mut streams: Vec<PacketStream<P::Output>> = vec![];
         for stream in self.streams {
-            let (mut p_runnables, mut p_streams) =
-                Process::new(stream, p.clone()).into_link().take();
-            runnables.append(&mut p_runnables);
-            streams.append(&mut p_streams);
+            // Little weird, still, process doesent create new runnables, so just
+            // manipulate the stream directly.
+            let p_stream = ProcessStream::new(stream, p.clone());
+            streams.push(Box::new(p_stream));
         }
         self.runnables.append(&mut runnables);
         Link::new(self.runnables, streams)
