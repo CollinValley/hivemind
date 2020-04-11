@@ -1,5 +1,5 @@
 use crate::Classifier;
-use crate::{link::Classify, IntoLink, Link, PacketStream};
+use crate::{link::DoClassify, Link, PacketStream};
 
 pub enum FizzBuzzVariant {
     FizzBuzz,
@@ -35,5 +35,5 @@ impl Classifier for FizzBuzz {
 }
 
 pub fn fizz_buzz_link(stream: PacketStream<i32>) -> Link<i32> {
-    Classify::new(stream, FizzBuzz::new(), None).into_link()
+    DoClassify::do_classify(stream, FizzBuzz::new(), None)
 }

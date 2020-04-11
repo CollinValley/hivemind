@@ -1,23 +1,27 @@
 use crate::link::utils::task_park::*;
 use crate::Classifier;
-use crate::{link::QueueStream, IntoLink, Link, PacketStream};
+use crate::{link::QueueStream, Link, PacketStream};
 use crossbeam::atomic::AtomicCell;
 use crossbeam::crossbeam_channel;
 use crossbeam::crossbeam_channel::{Receiver, Sender};
 use futures::prelude::*;
 use futures::ready;
 use futures::task::{Context, Poll};
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::stream::Stream;
 
-pub struct Classify<C: Classifier + 'static> {
-    runnable: ClassifyRunnable<C>,
-    streams: Vec<PacketStream<C::Packet>>,
+pub(crate) struct DoClassify<C: Classifier + Send + 'static> {
+    phantom: PhantomData<C>,
 }
 
-impl<C: Classifier + 'static> Classify<C> {
-    pub fn new(input: PacketStream<C::Packet>, classifier: C, cap: Option<usize>) -> Self {
+impl<C: Classifier + Send + 'static> DoClassify<C> {
+    pub(crate) fn do_classify(
+        input: PacketStream<C::Packet>,
+        classifier: C,
+        cap: Option<usize>,
+    ) -> Link<C::Packet> {
         let mut senders: Vec<Sender<Option<C::Packet>>> = Vec::new();
         let mut receivers: Vec<Receiver<Option<C::Packet>>> = Vec::new();
         let mut streams: Vec<PacketStream<C::Packet>> = Vec::new();
@@ -38,20 +42,11 @@ impl<C: Classifier + 'static> Classify<C> {
         }
         let runnable = ClassifyRunnable::new(input, senders, classifier, task_parks);
 
-        Classify { runnable, streams }
+        Link::new(vec![Box::new(runnable)], streams)
     }
 }
 
-impl<C: Classifier + Send + 'static> IntoLink<C::Packet> for Classify<C> {
-    fn into_link(self) -> Link<C::Packet> {
-        Link {
-            runnables: vec![Box::new(self.runnable)],
-            streams: self.streams,
-        }
-    }
-}
-
-pub struct ClassifyRunnable<C: Classifier> {
+pub(crate) struct ClassifyRunnable<C: Classifier> {
     input_stream: PacketStream<C::Packet>,
     to_egressors: Vec<Sender<Option<C::Packet>>>,
     classifier: C,

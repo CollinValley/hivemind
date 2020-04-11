@@ -1,6 +1,6 @@
 pub mod link;
 pub mod utils;
-use crate::link::Classify;
+use crate::link::DoClassify;
 
 pub trait Processor {
     type Input: Send + Clone;
@@ -112,15 +112,13 @@ trait ClassifyFn<C: Classifier + Send + Clone + 'static> {
 
 impl<C: Classifier + Clone + Send + 'static> ClassifyFn<C> for Link<C::Packet> {
     // This doesn't really fully work in parallel...weird interleavedness.
-    // Let's fully rework this.
-    // Remove dispatcher, class can just return portnum
-    // Make class also have a num_outputs() internal function
     // If there are n possible classifications and m streams, return n Links each containing
     // m streams.
     fn classify(mut self, classifier: C, cap: Option<usize>) -> Link<C::Packet> {
-        let (mut c_runnables, c_streams) = Classify::new(self.streams.remove(0), classifier, cap)
-            .into_link()
-            .take();
+        //Parallelism to come
+        assert!(self.streams.len() == 1);
+        let (mut c_runnables, c_streams) =
+            DoClassify::do_classify(self.streams.remove(0), classifier, cap).take();
         self.runnables.append(&mut c_runnables);
         Link::new(self.runnables, c_streams)
     }

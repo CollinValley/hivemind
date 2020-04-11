@@ -1,5 +1,5 @@
 use crate::Classifier;
-use crate::{link::Classify, IntoLink, Link, PacketStream};
+use crate::{link::DoClassify, Link, PacketStream};
 
 #[derive(Default, Clone)]
 pub struct Even {}
@@ -25,5 +25,5 @@ impl Classifier for Even {
 }
 
 pub fn even_link(stream: PacketStream<i32>) -> Link<i32> {
-    Classify::new(stream, Even::new(), None).into_link()
+    DoClassify::do_classify(stream, Even::new(), None)
 }
