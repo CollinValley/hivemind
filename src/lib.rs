@@ -20,10 +20,6 @@ pub type PacketStream<T> = Box<dyn futures::Stream<Item = T> + Send + Unpin>;
 
 pub type Runnable = Box<dyn futures::Future<Output = ()> + Send + Unpin>;
 
-pub trait IntoLink<Output: Send> {
-    fn into_link(self) -> Link<Output>;
-}
-
 pub struct Link<Packet: Send + Sized> {
     runnables: Vec<Runnable>,
     streams: Vec<PacketStream<Packet>>,
@@ -36,7 +32,7 @@ impl<Packet: Send + Sized + 'static> Link<Packet> {
         Link { runnables, streams }
     }
 
-    // Destructure Link, returning tuple of Runnables and Streams, which could
+    // Destructure a Link, returning tuple of Runnables and Streams, which could
     // be manually remade into new Links
     pub fn take(self) -> (Vec<Runnable>, Vec<PacketStream<Packet>>) {
         (self.runnables, self.streams)
@@ -117,7 +113,7 @@ impl<Packet: Send + Sized + Clone + 'static> Link<Packet> {
     }
 }
 
-pub(crate) trait ProcessFn<P: Processor + Clone + Send + 'static> {
+pub trait ProcessFn<P: Processor + Clone + Send + 'static> {
     fn process(self, processor: P) -> Link<P::Output>;
 }
 
@@ -135,7 +131,7 @@ impl<P: Processor + Clone + Send + 'static> ProcessFn<P> for Link<P::Input> {
     }
 }
 
-trait ClassifyFn<C: Classifier + Clone + Send + 'static> {
+pub trait ClassifyFn<C: Classifier + Clone + Send + 'static> {
     fn classify(self, classifier: C, cap: Option<usize>) -> Vec<Link<C::Packet>>;
 }
 
@@ -205,8 +201,7 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link =
-                Link::new(vec![], vec![immediate_stream(packets.clone())]).queue(Some(10));
+            let link = Link::new(vec![], vec![immediate_stream(packets.clone())]).queue(Some(10));
             test_link(link, None).await
         });
         assert_eq!(results[0], packets);
@@ -262,7 +257,6 @@ mod tests {
         assert_eq!(results[2], packets);
     }
 
-
     #[test]
     // Demonstrate that calling fork(2) on a link containing only one stream produces
     // 2 Links with the same one stream.
@@ -273,14 +267,8 @@ mod tests {
         let results = runtime.block_on(async {
             let f_links =
                 Link::new(vec![], vec![immediate_stream(packets.clone())]).fork(2, Some(10));
-            let mut runnables = vec![];
-            let mut streams = vec![];
-            for link in f_links {
-                let (mut r, mut s) = link.take();
-                runnables.append(&mut r);
-                streams.append(&mut s);
-            }
-            test_link(Link::new(runnables, streams), None).await
+
+            test_link(Link::join(f_links), None).await
         });
         assert_eq!(results[0], packets);
         assert_eq!(results[1], packets);
@@ -304,14 +292,7 @@ mod tests {
             )
             .fork(3, Some(10));
 
-            let mut runnables = vec![];
-            let mut streams = vec![];
-            for link in f_links {
-                let (mut r, mut s) = link.take();
-                runnables.append(&mut r);
-                streams.append(&mut s);
-            }
-            test_link(Link::new(runnables, streams), None).await
+            test_link(Link::join(f_links), None).await
         });
         assert_eq!(results[0], packets0);
         assert_eq!(results[1], packets1);
@@ -360,9 +341,9 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let mut links = Link::new(vec![], vec![immediate_stream(packets.clone())])
+            let links = Link::new(vec![], vec![immediate_stream(packets.clone())])
                 .classify(Even::new(), None);
-            test_link(links.remove(0), None).await
+            test_link(Link::join(links), None).await
         });
         assert_eq!(results.len(), 2);
         assert_eq!(results[0], vec![0, 2, 420, 4, 6, 8]);
@@ -380,20 +361,12 @@ mod tests {
                 vec![
                     immediate_stream(packets.clone()),
                     immediate_stream(packets.clone()),
-                    immediate_stream(packets.clone())
+                    immediate_stream(packets.clone()),
                 ],
             )
             .classify(Even::new(), None);
-
-            let mut runnables = vec![];
-            let mut streams = vec![];
             let num_links = links.len();
-            for link in links {
-                let (mut r, mut s) = link.take();
-                runnables.append(&mut r);
-                streams.append(&mut s);
-            }
-            (test_link(Link::new(runnables, streams), None).await , num_links)
+            (test_link(Link::join(links), None).await, num_links)
         });
         assert_eq!(num_links, 3);
         assert_eq!(results[0], vec![0, 2, 420, 4, 6, 8]);
@@ -405,29 +378,15 @@ mod tests {
     }
 
     #[test]
-    // Should correctly do nothing
     fn split_1_stream() {
         let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9];
 
         let mut runtime = initialize_runtime();
         let (results, num_links) = runtime.block_on(async {
-            let links = Link::new(
-                vec![],
-                vec![
-                    immediate_stream(packets.clone()),
-                ],
-            )
-            .split();
+            let links = Link::new(vec![], vec![immediate_stream(packets.clone())]).split();
 
-            let mut runnables = vec![];
-            let mut streams = vec![];
             let num_links = links.len();
-            for link in links {
-                let (mut r, mut s) = link.take();
-                runnables.append(&mut r);
-                streams.append(&mut s);
-            }
-            (test_link(Link::new(runnables, streams), None).await , num_links)
+            (test_link(Link::join(links), None).await, num_links)
         });
         assert_eq!(num_links, 1);
         assert_eq!(results[0], packets);
@@ -451,15 +410,8 @@ mod tests {
             )
             .split();
 
-            let mut runnables = vec![];
-            let mut streams = vec![];
             let num_links = links.len();
-            for link in links {
-                let (mut r, mut s) = link.take();
-                runnables.append(&mut r);
-                streams.append(&mut s);
-            }
-            (test_link(Link::new(runnables, streams), None).await , num_links)
+            (test_link(Link::join(links), None).await, num_links)
         });
         assert_eq!(num_links, 3);
         assert_eq!(results[0], packets0);
