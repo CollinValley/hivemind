@@ -75,17 +75,34 @@ impl<Packet: Send + Sized + 'static> Link<Packet> {
 }
 
 impl<Packet: Send + Sized + Clone + 'static> Link<Packet> {
-    // Create n copies of each stream, yielding num_streams * n total streams after
-    pub fn fork(mut self, count: usize, cap: Option<usize>) -> Self {
+    // Create n stream-level copies of this Link
+    pub fn fork(mut self, count: usize, cap: Option<usize>) -> Vec<Self> {
         let mut runnables = vec![];
-        let mut streams = vec![];
-        for stream in self.streams {
-            let (mut f_runnables, mut f_streams) = Link::do_fork(stream, count, cap).take();
+        let mut output_buckets: Vec<Vec<PacketStream<Packet>>> = vec![];
+
+        for input_stream in self.streams {
+            let (mut f_runnables, f_streams) = Link::do_fork(input_stream, count, cap).take();
             runnables.append(&mut f_runnables);
-            streams.append(&mut f_streams);
+            for (i, f_stream) in f_streams.into_iter().enumerate() {
+                match output_buckets.get_mut(i) {
+                    None => {
+                        output_buckets.push(vec![f_stream]);
+                    }
+                    Some(bucket) => {
+                        bucket.push(f_stream);
+                    }
+                }
+            }
         }
         self.runnables.append(&mut runnables);
-        Link::new(self.runnables, streams)
+
+        let mut links = vec![];
+        for streams in output_buckets {
+            let mut runnables = vec![];
+            runnables.append(&mut self.runnables);
+            links.push(Link::new(runnables, streams));
+        }
+        links
     }
 }
 
@@ -136,30 +153,34 @@ mod tests {
     };
 
     #[test]
-    fn smoke_router() {
+    fn process_1_stream() {
         let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9, 10];
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let mut links = Link::new(vec![], vec![immediate_stream(packets.clone())])
-                .process(Identity::new())
-                .queue(Some(1))
-                .fork(3, Some(10))
-                .zip(None)
-                .classify(Even::new(), None);
-            test_link(links.remove(0), None).await
+            let link =
+                Link::new(vec![], vec![immediate_stream(packets.clone())]).process(Identity::new());
+            test_link(link, None).await
         });
-        assert_eq!(results[0].len(), 21);
-        assert_eq!(results[1].len(), 18);
+        assert_eq!(results[0], packets);
     }
 
     #[test]
-    fn fork_chain() {
-        let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9];
+    fn process_3_streams() {
+        let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9, 10];
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link = Link::new(vec![], vec![immediate_stream(packets.clone())]).fork(3, Some(10));
+            let link = Link::new(
+                vec![],
+                vec![
+                    immediate_stream(packets.clone()),
+                    immediate_stream(packets.clone()),
+                    immediate_stream(packets.clone()),
+                ],
+            )
+            .process(Identity::new());
+
             test_link(link, None).await
         });
         assert_eq!(results[0], packets);
@@ -168,14 +189,126 @@ mod tests {
     }
 
     #[test]
-    fn zip_chain() {
+    fn queue_1_stream() {
+        let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9, 10];
+
+        let mut runtime = initialize_runtime();
+        let results = runtime.block_on(async {
+            let link =
+                Link::new(vec![], vec![immediate_stream(packets.clone())]).queue(Some(10));
+            test_link(link, None).await
+        });
+        assert_eq!(results[0], packets);
+    }
+
+    #[test]
+    fn queue_3_streams() {
+        let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9, 10];
+
+        let mut runtime = initialize_runtime();
+        let results = runtime.block_on(async {
+            let link = Link::new(
+                vec![],
+                vec![
+                    immediate_stream(packets.clone()),
+                    immediate_stream(packets.clone()),
+                    immediate_stream(packets.clone()),
+                ],
+            )
+            .process(Identity::new());
+
+            test_link(link, None).await
+        });
+        assert_eq!(results[0], packets);
+        assert_eq!(results[1], packets);
+        assert_eq!(results[2], packets);
+    }
+
+    #[test]
+    // Demonstrate that calling fork(2) on a link containing only one stream produces
+    // 2 Links with the same one stream.
+    fn fork_1_stream() {
         let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9];
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async {
-            let link = Link::new(vec![], vec![immediate_stream(packets.clone())])
-                .fork(3, Some(10))
-                .zip(None);
+            let f_links =
+                Link::new(vec![], vec![immediate_stream(packets.clone())]).fork(2, Some(10));
+            let mut runnables = vec![];
+            let mut streams = vec![];
+            for link in f_links {
+                let (mut r, mut s) = link.take();
+                runnables.append(&mut r);
+                streams.append(&mut s);
+            }
+            test_link(Link::new(runnables, streams), None).await
+        });
+        assert_eq!(results[0], packets);
+        assert_eq!(results[1], packets);
+    }
+
+    #[test]
+    // Demonstrate calling fork(2) on a link containing two streams produces 3 links,
+    // each with one of each stream.
+    fn fork_2_streams() {
+        let packets0: Vec<i32> = vec![0, 1, 2, 420, 1337];
+        let packets1: Vec<i32> = vec![6, 7, 8, 9, 10];
+
+        let mut runtime = initialize_runtime();
+        let results = runtime.block_on(async {
+            let f_links = Link::new(
+                vec![],
+                vec![
+                    immediate_stream(packets0.clone()),
+                    immediate_stream(packets1.clone()),
+                ],
+            )
+            .fork(3, Some(10));
+
+            let mut runnables = vec![];
+            let mut streams = vec![];
+            for link in f_links {
+                let (mut r, mut s) = link.take();
+                runnables.append(&mut r);
+                streams.append(&mut s);
+            }
+            test_link(Link::new(runnables, streams), None).await
+        });
+        assert_eq!(results[0], packets0);
+        assert_eq!(results[1], packets1);
+        assert_eq!(results[2], packets0);
+        assert_eq!(results[3], packets1);
+    }
+
+    #[test]
+    fn zip_1_stream() {
+        let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9];
+
+        let mut runtime = initialize_runtime();
+        let results = runtime.block_on(async {
+            let link = Link::new(vec![], vec![immediate_stream(packets.clone())]).zip(None);
+            test_link(link, None).await
+        });
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].len(), packets.len());
+    }
+
+    #[test]
+    fn zip_3_streams() {
+        let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9];
+
+        let mut runtime = initialize_runtime();
+        let results = runtime.block_on(async {
+            let link = Link::new(
+                vec![],
+                vec![
+                    immediate_stream(packets.clone()),
+                    immediate_stream(packets.clone()),
+                    immediate_stream(packets.clone()),
+                ],
+            )
+            .zip(None);
+
             test_link(link, None).await
         });
         assert_eq!(results.len(), 1);
@@ -183,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn classify_chain() {
+    fn classify_1_stream() {
         let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9];
 
         let mut runtime = initialize_runtime();
@@ -195,5 +328,103 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert_eq!(results[0], vec![0, 2, 420, 4, 6, 8]);
         assert_eq!(results[1], vec![1, 1337, 3, 5, 7, 9]);
+    }
+
+    #[test]
+    fn classify_3_streams() {
+        let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9];
+
+        let mut runtime = initialize_runtime();
+        let (results, num_links) = runtime.block_on(async {
+            let links = Link::new(
+                vec![],
+                vec![
+                    immediate_stream(packets.clone()),
+                    immediate_stream(packets.clone()),
+                    immediate_stream(packets.clone())
+                ],
+            )
+            .classify(Even::new(), None);
+
+            let mut runnables = vec![];
+            let mut streams = vec![];
+            let num_links = links.len();
+            for link in links {
+                let (mut r, mut s) = link.take();
+                runnables.append(&mut r);
+                streams.append(&mut s);
+            }
+            (test_link(Link::new(runnables, streams), None).await , num_links)
+        });
+        assert_eq!(num_links, 3);
+        assert_eq!(results[0], vec![0, 2, 420, 4, 6, 8]);
+        assert_eq!(results[1], vec![1, 1337, 3, 5, 7, 9]);
+        assert_eq!(results[2], vec![0, 2, 420, 4, 6, 8]);
+        assert_eq!(results[3], vec![1, 1337, 3, 5, 7, 9]);
+        assert_eq!(results[4], vec![0, 2, 420, 4, 6, 8]);
+        assert_eq!(results[5], vec![1, 1337, 3, 5, 7, 9]);
+    }
+
+    #[test]
+    // Should correctly do nothing
+    fn split_1_stream() {
+        let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9];
+
+        let mut runtime = initialize_runtime();
+        let (results, num_links) = runtime.block_on(async {
+            let links = Link::new(
+                vec![],
+                vec![
+                    immediate_stream(packets.clone()),
+                ],
+            )
+            .split();
+
+            let mut runnables = vec![];
+            let mut streams = vec![];
+            let num_links = links.len();
+            for link in links {
+                let (mut r, mut s) = link.take();
+                runnables.append(&mut r);
+                streams.append(&mut s);
+            }
+            (test_link(Link::new(runnables, streams), None).await , num_links)
+        });
+        assert_eq!(num_links, 1);
+        assert_eq!(results[0], packets);
+    }
+
+    #[test]
+    fn split_3_streams() {
+        let packets0: Vec<i32> = vec![0, 1, 2, 420];
+        let packets1: Vec<i32> = vec![1337, 3, 4, 5];
+        let packets2: Vec<i32> = vec![6, 7, 8, 9];
+
+        let mut runtime = initialize_runtime();
+        let (results, num_links) = runtime.block_on(async {
+            let links = Link::new(
+                vec![],
+                vec![
+                    immediate_stream(packets0.clone()),
+                    immediate_stream(packets1.clone()),
+                    immediate_stream(packets2.clone()),
+                ],
+            )
+            .split();
+
+            let mut runnables = vec![];
+            let mut streams = vec![];
+            let num_links = links.len();
+            for link in links {
+                let (mut r, mut s) = link.take();
+                runnables.append(&mut r);
+                streams.append(&mut s);
+            }
+            (test_link(Link::new(runnables, streams), None).await , num_links)
+        });
+        assert_eq!(num_links, 3);
+        assert_eq!(results[0], packets0);
+        assert_eq!(results[1], packets1);
+        assert_eq!(results[2], packets2);
     }
 }
