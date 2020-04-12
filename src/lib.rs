@@ -72,6 +72,17 @@ impl<Packet: Send + Sized + 'static> Link<Packet> {
         }
         links
     }
+
+    pub fn join(links: Vec<Self>) -> Self {
+        let mut runnables = vec![];
+        let mut streams = vec![];
+        for link in links {
+            let (mut r, mut s) = link.take();
+            runnables.append(&mut r);
+            streams.append(&mut s);
+        }
+        Link::new(runnables, streams)
+    }
 }
 
 impl<Packet: Send + Sized + Clone + 'static> Link<Packet> {
@@ -223,6 +234,34 @@ mod tests {
         assert_eq!(results[1], packets);
         assert_eq!(results[2], packets);
     }
+
+    #[test]
+    fn join_1_link() {
+        let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9];
+        let mut runtime = initialize_runtime();
+        let results = runtime.block_on(async {
+            let link = Link::new(vec![], vec![immediate_stream(packets.clone())]);
+            test_link(Link::join(vec![link]), None).await
+        });
+        assert_eq!(results[0], packets);
+    }
+
+    #[test]
+    fn join_3_links() {
+        let packets: Vec<i32> = vec![0, 1, 2, 420, 1337, 3, 4, 5, 6, 7, 8, 9];
+        let mut runtime = initialize_runtime();
+        let results = runtime.block_on(async {
+            let link0 = Link::new(vec![], vec![immediate_stream(packets.clone())]);
+            let link1 = Link::new(vec![], vec![immediate_stream(packets.clone())]);
+            let link2 = Link::new(vec![], vec![immediate_stream(packets.clone())]);
+            let links = vec![link0, link1, link2];
+            test_link(Link::join(links), None).await
+        });
+        assert_eq!(results[0], packets);
+        assert_eq!(results[1], packets);
+        assert_eq!(results[2], packets);
+    }
+
 
     #[test]
     // Demonstrate that calling fork(2) on a link containing only one stream produces
