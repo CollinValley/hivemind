@@ -69,7 +69,7 @@ impl<P> ForkRunnable<P> {
 impl<P: Send + Clone> Future for ForkRunnable<P> {
     type Output = ();
 
-    /// If any of the channels are full, we await that channel to clear before processing a new packet.
+    // If any of the channels are full, we await that channel to clear before processing a new packet.
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         loop {
             for (port, to_egressor) in self.to_egressors.iter().enumerate() {

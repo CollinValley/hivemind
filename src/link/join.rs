@@ -70,23 +70,23 @@ impl<Packet: Sized> JoinRunnable<Packet> {
 impl<Packet: Sized> Future for JoinRunnable<Packet> {
     type Output = ();
 
-    /// Implement Poll for Future for JoinRunnable
-    ///
-    /// Note that this function works a bit different, it continues to process
-    /// packets off it's input queue until it reaches a point where it can not
-    /// make forward progress. There are three cases:
-    /// ###
-    /// #1 The to_egressor queue is full, we wake the egressor that we need
-    /// awaking when there is work to do, and go to sleep.
-    ///
-    /// #2 The input_stream returns a NotReady, we sleep, with the assumption
-    /// that whomever produced the NotReady will awaken the task in the Future.
-    ///
-    /// #3 We get a Ready(None), in which case we push a None onto the to_egressor
-    /// queue and then return Ready(()), which means we enter tear-down, since there
-    /// is no futher work to complete.
-    /// ###
-    /// By Sleep, we mean we return a NotReady to the runtime which will sleep the task.
+    // Implement Poll for Future for JoinRunnable
+    //
+    // Note that this function works a bit different, it continues to process
+    // packets off it's input queue until it reaches a point where it can not
+    // make forward progress. There are three cases:
+    // ###
+    // #1 The to_egressor queue is full, we wake the egressor that we need
+    // awaking when there is work to do, and go to sleep.
+    //
+    // #2 The input_stream returns a NotReady, we sleep, with the assumption
+    // that whomever produced the NotReady will awaken the task in the Future.
+    //
+    // #3 We get a Ready(None), in which case we push a None onto the to_egressor
+    // queue and then return Ready(()), which means we enter tear-down, since there
+    // is no futher work to complete.
+    // ###
+    // By Sleep, we mean we return a NotReady to the runtime which will sleep the task.
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let ingressor = Pin::into_inner(self);
         loop {
@@ -149,8 +149,8 @@ impl<Packet: Sized> Drop for JoinStream<Packet> {
 impl<Packet: Sized> Stream for JoinStream<Packet> {
     type Item = Packet;
 
-    /// Iterate over all the channels, pull the first packet that is available.
-    /// This starts at the next index after the last successful recv
+    // Iterate over all the channels, pull the first packet that is available.
+    // This starts at the next index after the last successful recv
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         //rotate_slice exists in 1.22 nightly experimental
         let egressor = Pin::into_inner(self);

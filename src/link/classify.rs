@@ -74,10 +74,10 @@ impl<C: Classifier> ClassifyRunnable<C> {
 impl<C: Classifier> Future for ClassifyRunnable<C> {
     type Output = ();
 
-    /// Same logic as QueueEgressor, except if any of the channels are full we
-    /// await that channel to clear before processing a new packet. This is somewhat
-    /// inefficient, but seems acceptable for now since we want to yield compute to
-    /// that egressor, as there is a backup in its queue.
+    // Same logic as QueueEgressor, except if any of the channels are full we
+    // await that channel to clear before processing a new packet. This is somewhat
+    // inefficient, but seems acceptable for now since we want to yield compute to
+    // that egressor, as there is a backup in its queue.
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let ingressor = Pin::into_inner(self);
         loop {

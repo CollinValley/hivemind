@@ -29,7 +29,6 @@ impl<Packet: Send + Sized + 'static> Link<Packet> {
     }
 }
 
-// TODO: Fixup docs
 // The QueueIngressor is responsible for polling its input stream,
 // processing them using the `processor`s process function, and pushing the
 // output packet onto the to_egressor queue. It does work in batches, so it
@@ -111,7 +110,6 @@ impl<Packet: Send + Sized> Future for QueueRunnable<Packet> {
     }
 }
 
-// TODO: Docs fixup
 // The Egressor side of the QueueLink is responsible to converting the
 // output queue of processed packets, which is a crossbeam channel, to a
 // Stream that can be polled for packets. It ends up being owned by the
