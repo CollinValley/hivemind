@@ -12,9 +12,8 @@ impl Even {
 
 impl Classifier for Even {
     type Packet = i32;
-    const NUM_PORTS: usize = 2;
 
-    fn classify(&self, packet: &Self::Packet) -> Option<usize> {
+    fn classify(&mut self, packet: &Self::Packet) -> Option<usize> {
         //hilarious.  I'm too lazy to change this out to a usize packet type
         match packet % 2 {
             0 => Some(0),
@@ -22,8 +21,10 @@ impl Classifier for Even {
             _ => None,
         }
     }
+    fn num_ports(&mut self) -> usize { 2 }
 }
 
 pub fn even_link(stream: PacketStream<i32>) -> Link<i32> {
     DoClassify::do_classify(stream, Even::new(), None)
 }
+

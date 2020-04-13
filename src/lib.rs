@@ -11,9 +11,9 @@ pub trait Processor {
 
 pub trait Classifier {
     type Packet: Send + 'static;
-    const NUM_PORTS: usize;
 
-    fn classify(&self, packet: &Self::Packet) -> Option<usize>;
+    fn classify(&mut self, packet: &Self::Packet) -> Option<usize>;
+    fn num_ports(&mut self) -> usize;
 }
 
 pub type PacketStream<T> = Box<dyn futures::Stream<Item = T> + Send + Unpin>;
@@ -52,8 +52,23 @@ impl<Packet: Send + Sized + 'static> Link<Packet> {
     }
 
     // Join all streams in a link into one stream.
+    // Use to remove parallelism in a Link
     pub fn zip(mut self, cap: Option<usize>) -> Self {
         let (mut runnables, streams) = Link::do_join(self.streams, cap).take();
+        self.runnables.append(&mut runnables);
+        Link::new(self.runnables, streams)
+    }
+
+
+    // Unzip a stream into n seperate streams, round robin.
+    // Use this to increase parallelism in a Link
+    pub fn unzip(mut self, into: usize, cap: Option<usize>) -> Self {
+        assert!(self.streams.len() == 1);
+        let (mut runnables, streams) = DoClassify::do_classify(
+            self.streams.remove(0),
+            Unzipper::<Packet>::new(into),
+            cap
+        ).take();
         self.runnables.append(&mut runnables);
         Link::new(self.runnables, streams)
     }
@@ -148,6 +163,42 @@ impl<C: Classifier + Clone + Send + 'static> ClassifyFn<C> for Link<C::Packet> {
         links
     }
 }
+
+use std::marker::PhantomData;
+// This is a fairly simple, round robin unzipper classifier.  Since it must run in round robin, if one stream
+// runs consistently faster than the others, it will be underfed.  But, I don't want to over-optimize too
+// early and implement a special work-queue lower level link to use instead of classify, so this should
+// do for now.
+pub struct Unzipper<A> {
+    phantom: PhantomData<A>,
+    by: usize,
+    count: usize,
+}
+
+impl<A> Unzipper<A> {
+    pub fn new(by: usize) -> Self {
+        Unzipper {
+            phantom: PhantomData,
+            by: by,
+            count: 0,
+        }
+    }
+}
+
+impl<A: Send + 'static> Classifier for Unzipper<A> {
+    type Packet = A;
+
+    fn classify(&mut self, _packet: &Self::Packet) -> Option<usize> {
+        let cur_count = self.count;
+        self.count = self.count + 1;
+        Some(cur_count % self.by)
+    }
+
+    fn num_ports(&mut self) -> usize {
+        self.by
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -333,6 +384,20 @@ mod tests {
         });
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].len(), packets.len() * 3);
+    }
+
+    #[test]
+    fn unzip_1_stream_into_2_streams() {
+        let packets: Vec<i32> = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+        let mut runtime = initialize_runtime();
+        let results = runtime.block_on(async {
+            let link = Link::new(vec![], vec![immediate_stream(packets.clone())]).unzip(2, None);
+            test_link(link, None).await
+        });
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0], vec![0,2,4,6,8]);
+        assert_eq!(results[1], vec![1,3,5,7,9]);
     }
 
     #[test]

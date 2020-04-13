@@ -19,9 +19,8 @@ impl FizzBuzz {
 
 impl Classifier for FizzBuzz {
     type Packet = i32;
-    const NUM_PORTS: usize = 4;
 
-    fn classify(&self, packet: &Self::Packet) -> Option<usize> {
+    fn classify(&mut self, packet: &Self::Packet) -> Option<usize> {
         if packet % 3 == 0 && packet % 5 == 0 {
             Some(0)
         } else if packet % 3 == 0 {
@@ -32,6 +31,8 @@ impl Classifier for FizzBuzz {
             Some(3)
         }
     }
+
+    fn num_ports(&mut self) -> usize { 4 }
 }
 
 pub fn fizz_buzz_link(stream: PacketStream<i32>) -> Link<i32> {

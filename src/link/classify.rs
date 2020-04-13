@@ -19,7 +19,7 @@ pub(crate) struct DoClassify<C: Classifier + Send + 'static> {
 impl<C: Classifier + Send + 'static> DoClassify<C> {
     pub(crate) fn do_classify(
         input: PacketStream<C::Packet>,
-        classifier: C,
+        mut classifier: C,
         cap: Option<usize>,
     ) -> Link<C::Packet> {
         let mut senders: Vec<Sender<Option<C::Packet>>> = Vec::new();
@@ -27,7 +27,7 @@ impl<C: Classifier + Send + 'static> DoClassify<C> {
         let mut streams: Vec<PacketStream<C::Packet>> = Vec::new();
         let mut task_parks: Vec<Arc<AtomicCell<TaskParkState>>> = Vec::new();
 
-        for _ in 0..C::NUM_PORTS {
+        for _ in 0..classifier.num_ports() {
             let (sender, receiver) = match cap {
                 None => crossbeam_channel::unbounded::<Option<C::Packet>>(),
                 Some(capacity) => crossbeam_channel::bounded::<Option<C::Packet>>(capacity),
@@ -109,7 +109,7 @@ impl<C: Classifier> Future for ClassifyRunnable<C> {
                         if port >= ingressor.to_egressors.len() {
                             panic!("Classifier used port outside of its listed range: Port {}, NumOutputs{}",
                                    port,
-                                   C::NUM_PORTS
+                                   ingressor.classifier.num_ports(),
                             );
                         }
                         if let Err(err) = ingressor.to_egressors[port].try_send(Some(packet)) {
