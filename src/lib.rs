@@ -59,16 +59,20 @@ impl<Packet: Send + Sized + 'static> Link<Packet> {
         Link::new(self.runnables, streams)
     }
 
-
-    // Unzip a stream into n seperate streams, round robin.
+    // Unzip each stream into n seperate streams, round robin.
+    // If you have 2 streams, and unzip by 2, you will end with 4 streams. Data
+    // from the first input stream will be in the first 2 output streams, likewise for the
+    // second input stream and final 2 output streams.
     // Use this to increase parallelism in a Link
-    pub fn unzip(mut self, into: usize, cap: Option<usize>) -> Self {
-        assert!(self.streams.len() == 1);
-        let (mut runnables, streams) = DoClassify::do_classify(
-            self.streams.remove(0),
-            Unzipper::<Packet>::new(into),
-            cap
-        ).take();
+    pub fn unzip(mut self, by: usize, cap: Option<usize>) -> Self {
+        let mut runnables = vec![];
+        let mut streams = vec![];
+        for stream in self.streams {
+            let (mut r, mut s) =
+                DoClassify::do_classify(stream, Unzipper::<Packet>::new(by), cap).take();
+            runnables.append(&mut r);
+            streams.append(&mut s);
+        }
         self.runnables.append(&mut runnables);
         Link::new(self.runnables, streams)
     }
@@ -179,7 +183,7 @@ impl<A> Unzipper<A> {
     pub fn new(by: usize) -> Self {
         Unzipper {
             phantom: PhantomData,
-            by: by,
+            by,
             count: 0,
         }
     }
@@ -190,7 +194,7 @@ impl<A: Send + 'static> Classifier for Unzipper<A> {
 
     fn classify(&mut self, _packet: &Self::Packet) -> Option<usize> {
         let cur_count = self.count;
-        self.count = self.count + 1;
+        self.count += 1;
         Some(cur_count % self.by)
     }
 
@@ -198,7 +202,6 @@ impl<A: Send + 'static> Classifier for Unzipper<A> {
         self.by
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -396,8 +399,32 @@ mod tests {
             test_link(link, None).await
         });
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0], vec![0,2,4,6,8]);
-        assert_eq!(results[1], vec![1,3,5,7,9]);
+        assert_eq!(results[0], vec![0, 2, 4, 6, 8]);
+        assert_eq!(results[1], vec![1, 3, 5, 7, 9]);
+    }
+
+    #[test]
+    fn unzip_2_streams_into_4_streams() {
+        let packets0: Vec<i32> = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+        let packets1: Vec<i32> = vec![10, 11, 12, 13];
+
+        let mut runtime = initialize_runtime();
+        let results = runtime.block_on(async {
+            let link = Link::new(
+                vec![],
+                vec![
+                    immediate_stream(packets0.clone()),
+                    immediate_stream(packets1.clone()),
+                ],
+            )
+            .unzip(2, None);
+            test_link(link, None).await
+        });
+        assert_eq!(results.len(), 4);
+        assert_eq!(results[0], vec![0, 2, 4, 6, 8]);
+        assert_eq!(results[1], vec![1, 3, 5, 7, 9]);
+        assert_eq!(results[2], vec![10, 12]);
+        assert_eq!(results[3], vec![11, 13]);
     }
 
     #[test]

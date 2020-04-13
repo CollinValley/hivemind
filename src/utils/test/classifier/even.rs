@@ -21,10 +21,11 @@ impl Classifier for Even {
             _ => None,
         }
     }
-    fn num_ports(&mut self) -> usize { 2 }
+    fn num_ports(&mut self) -> usize {
+        2
+    }
 }
 
 pub fn even_link(stream: PacketStream<i32>) -> Link<i32> {
     DoClassify::do_classify(stream, Even::new(), None)
 }
-

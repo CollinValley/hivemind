@@ -32,7 +32,9 @@ impl Classifier for FizzBuzz {
         }
     }
 
-    fn num_ports(&mut self) -> usize { 4 }
+    fn num_ports(&mut self) -> usize {
+        4
+    }
 }
 
 pub fn fizz_buzz_link(stream: PacketStream<i32>) -> Link<i32> {
