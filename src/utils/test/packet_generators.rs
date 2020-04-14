@@ -1,4 +1,4 @@
-use crate::PacketStream;
+use crate::HStream;
 use futures::prelude::*;
 use futures::ready;
 use futures::task::{Context, Poll};
@@ -7,7 +7,7 @@ use tokio::time::{interval, Duration, Interval};
 
 /// Immediately yields a collection of packets to be poll'd.
 /// Thin wrapper around iter_ok.
-pub fn immediate_stream<I>(collection: I) -> PacketStream<I::Item>
+pub fn immediate_stream<I>(collection: I) -> HStream<I::Item>
 where
     I: IntoIterator,
     I::IntoIter: Send + 'static,

@@ -1,6 +1,6 @@
 use crate::link::utils::task_park::*;
 use crate::Classifier;
-use crate::{link::QueueStream, Link, PacketStream};
+use crate::{link::QueueStream, HStream, Link};
 use crossbeam::atomic::AtomicCell;
 use crossbeam::crossbeam_channel;
 use crossbeam::crossbeam_channel::{Receiver, Sender};
@@ -18,13 +18,13 @@ pub(crate) struct DoClassify<C: Classifier + Send + 'static> {
 
 impl<C: Classifier + Send + 'static> DoClassify<C> {
     pub(crate) fn do_classify(
-        input: PacketStream<C::Packet>,
+        input: HStream<C::Packet>,
         mut classifier: C,
         cap: Option<usize>,
     ) -> Link<C::Packet> {
         let mut senders: Vec<Sender<Option<C::Packet>>> = Vec::new();
         let mut receivers: Vec<Receiver<Option<C::Packet>>> = Vec::new();
-        let mut streams: Vec<PacketStream<C::Packet>> = Vec::new();
+        let mut streams: Vec<HStream<C::Packet>> = Vec::new();
         let mut task_parks: Vec<Arc<AtomicCell<TaskParkState>>> = Vec::new();
 
         for _ in 0..classifier.num_ports() {
@@ -47,7 +47,7 @@ impl<C: Classifier + Send + 'static> DoClassify<C> {
 }
 
 pub(crate) struct ClassifyRunnable<C: Classifier> {
-    input_stream: PacketStream<C::Packet>,
+    input_stream: HStream<C::Packet>,
     to_egressors: Vec<Sender<Option<C::Packet>>>,
     classifier: C,
     task_parks: Vec<Arc<AtomicCell<TaskParkState>>>,
@@ -57,7 +57,7 @@ impl<C: Classifier> Unpin for ClassifyRunnable<C> {}
 
 impl<C: Classifier> ClassifyRunnable<C> {
     fn new(
-        input_stream: PacketStream<C::Packet>,
+        input_stream: HStream<C::Packet>,
         to_egressors: Vec<Sender<Option<C::Packet>>>,
         classifier: C,
         task_parks: Vec<Arc<AtomicCell<TaskParkState>>>,

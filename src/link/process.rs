@@ -1,16 +1,16 @@
-use crate::{PacketStream, Processor};
+use crate::{HStream, Processor};
 use futures::prelude::*;
 use futures::ready;
 use futures::task::{Context, Poll};
 use std::pin::Pin;
 
 pub(crate) struct ProcessStream<P: Processor> {
-    in_stream: PacketStream<P::Input>,
+    in_stream: HStream<P::Input>,
     processor: P,
 }
 
 impl<P: Processor> ProcessStream<P> {
-    pub fn new(in_stream: PacketStream<P::Input>, processor: P) -> Self {
+    pub fn new(in_stream: HStream<P::Input>, processor: P) -> Self {
         ProcessStream {
             in_stream,
             processor,

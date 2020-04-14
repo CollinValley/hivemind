@@ -1,5 +1,5 @@
 use crate::link::utils::task_park::*;
-use crate::{Link, PacketStream};
+use crate::{HStream, Link};
 use crossbeam::atomic::AtomicCell;
 use crossbeam::crossbeam_channel;
 use crossbeam::crossbeam_channel::{Receiver, Sender, TryRecvError};
@@ -10,7 +10,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 impl<Packet: Send + Sized + 'static> Link<Packet> {
-    pub(crate) fn do_queue(input: PacketStream<Packet>, cap: Option<usize>) -> Self {
+    pub(crate) fn do_queue(input: HStream<Packet>, cap: Option<usize>) -> Self {
         let (sender, reciever) = match cap {
             None => crossbeam_channel::unbounded::<Option<Packet>>(),
             Some(capacity) => crossbeam_channel::bounded::<Option<Packet>>(capacity),
@@ -36,14 +36,14 @@ impl<Packet: Send + Sized + 'static> Link<Packet> {
 // after which it will return NotReady to sleep. This is handed to, and is
 // polled by the runtime.
 pub(crate) struct QueueRunnable<Packet: Sized> {
-    input_stream: PacketStream<Packet>,
+    input_stream: HStream<Packet>,
     to_egressor: Sender<Option<Packet>>,
     task_park: Arc<AtomicCell<TaskParkState>>,
 }
 
 impl<Packet: Sized> QueueRunnable<Packet> {
     fn new(
-        input_stream: PacketStream<Packet>,
+        input_stream: HStream<Packet>,
         to_egressor: Sender<Option<Packet>>,
         task_park: Arc<AtomicCell<TaskParkState>>,
     ) -> Self {
@@ -76,13 +76,13 @@ impl<Packet: Send + Sized> Future for QueueRunnable<Packet> {
     // queue and then return Ready(()), which means we enter tear-down, since there
     // is no further work to complete.
     //
-    // #4 If our upstream `PacketStream` has a packet for us, we pass it to our `processor`
+    // #4 If our upstream `HStream` has a packet for us, we pass it to our `processor`
     // for `process`ing. Most of the time, it will yield a `Some(output_packet)` that has
     // been transformed in some way. We pass that on to our egress channel and wake
-    // our `Egressor` that it has work to do, and continue polling our upstream `PacketStream`.
+    // our `Egressor` that it has work to do, and continue polling our upstream `HStream`.
     //
     // #5 `processor`s may also choose to "drop" packets by returning `None`, so we do nothing
-    // and poll our upstream `PacketStream` again.
+    // and poll our upstream `HStream` again.
     //
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         loop {

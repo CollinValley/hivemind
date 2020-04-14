@@ -1,5 +1,5 @@
 use crate::link::utils::task_park::*;
-use crate::{link::QueueStream, Link, PacketStream};
+use crate::{link::QueueStream, HStream, Link};
 use crossbeam::atomic::AtomicCell;
 use crossbeam::crossbeam_channel;
 use crossbeam::crossbeam_channel::{Receiver, Sender};
@@ -10,13 +10,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 impl<Packet: Clone + Send + 'static> Link<Packet> {
-    pub(crate) fn do_fork(
-        input: PacketStream<Packet>,
-        count: usize,
-        capacity: Option<usize>,
-    ) -> Self {
+    pub(crate) fn do_fork(input: HStream<Packet>, count: usize, capacity: Option<usize>) -> Self {
         let mut to_egressors: Vec<Sender<Option<Packet>>> = Vec::new();
-        let mut egressors: Vec<PacketStream<Packet>> = Vec::new();
+        let mut egressors: Vec<HStream<Packet>> = Vec::new();
 
         let mut from_ingressors: Vec<Receiver<Option<Packet>>> = Vec::new();
 
@@ -47,14 +43,14 @@ impl<Packet: Clone + Send + 'static> Link<Packet> {
 }
 
 pub struct ForkRunnable<P> {
-    input_stream: PacketStream<P>,
+    input_stream: HStream<P>,
     to_egressors: Vec<Sender<Option<P>>>,
     task_parks: Vec<Arc<AtomicCell<TaskParkState>>>,
 }
 
 impl<P> ForkRunnable<P> {
     fn new(
-        input_stream: PacketStream<P>,
+        input_stream: HStream<P>,
         to_egressors: Vec<Sender<Option<P>>>,
         task_parks: Vec<Arc<AtomicCell<TaskParkState>>>,
     ) -> Self {

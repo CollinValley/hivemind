@@ -16,25 +16,35 @@ pub trait Classifier {
     fn num_ports(&mut self) -> usize;
 }
 
-pub type PacketStream<T> = Box<dyn futures::Stream<Item = T> + Send + Unpin>;
+/// A Boxed futures::Stream, used by hivemind for data flow. They must be
+/// boxed so we can hand around vectors of them
+pub type HStream<T> = Box<dyn futures::Stream<Item = T> + Send + Unpin>;
 
+/// Runnables, a redefined type over Future, refers to the internal handles hivemind
+/// generates as it builds the graph. Most of the operations in hivemind, other than those
+/// that operate as a 1-1 map, create runnables as a side effect. Runnables that are created
+/// must be collected and provided to the runtime for the graph to operate. Most of the time,
+/// this is not a manual process, runnables are automatically "rolled forward" in Links that
+/// are transformed through the provided functions, such as unzip(). However, if you call take()
+/// on a link, the runnables that are provided must be manually collected by yourself.
 pub type Runnable = Box<dyn futures::Future<Output = ()> + Send + Unpin>;
 
 pub struct Link<Packet: Send + Sized> {
     runnables: Vec<Runnable>,
-    streams: Vec<PacketStream<Packet>>,
+    streams: Vec<HStream<Packet>>,
 }
 
 #[allow(dead_code)]
 impl<Packet: Send + Sized + 'static> Link<Packet> {
-    // Create a new Link
-    pub fn new(runnables: Vec<Runnable>, streams: Vec<PacketStream<Packet>>) -> Self {
+    /// Create a new Link, from runnables and streams.  If the streams were created outside
+    /// of the hivemind library, the runnables field can be left as an empty Vec.
+    pub fn new(runnables: Vec<Runnable>, streams: Vec<HStream<Packet>>) -> Link<Packet> {
         Link { runnables, streams }
     }
 
-    // Destructure a Link, returning tuple of Runnables and Streams, which could
-    // be manually remade into new Links
-    pub fn take(self) -> (Vec<Runnable>, Vec<PacketStream<Packet>>) {
+    /// Destructure a Link, returning tuple of Runnables and HStreams, which could
+    /// be manually remade into new Links
+    pub fn take(self) -> (Vec<Runnable>, Vec<HStream<Packet>>) {
         (self.runnables, self.streams)
     }
 
@@ -104,7 +114,7 @@ impl<Packet: Send + Sized + Clone + 'static> Link<Packet> {
     // Create n stream-level copies of this Link
     pub fn fork(mut self, count: usize, cap: Option<usize>) -> Vec<Self> {
         let mut runnables = vec![];
-        let mut output_buckets: Vec<Vec<PacketStream<Packet>>> = vec![];
+        let mut output_buckets: Vec<Vec<HStream<Packet>>> = vec![];
 
         for input_stream in self.streams {
             let (mut f_runnables, f_streams) = Link::do_fork(input_stream, count, cap).take();
@@ -139,7 +149,7 @@ pub trait ProcessFn<P: Processor + Clone + Send + 'static> {
 impl<P: Processor + Clone + Send + 'static> ProcessFn<P> for Link<P::Input> {
     // Append process to each stream in link
     fn process(self, p: P) -> Link<P::Output> {
-        let mut streams: Vec<PacketStream<P::Output>> = vec![];
+        let mut streams: Vec<HStream<P::Output>> = vec![];
         for stream in self.streams {
             // Little weird, still, process doesn't create new runnables, so just
             // manipulate the stream directly.
@@ -173,7 +183,7 @@ use std::marker::PhantomData;
 // runs consistently faster than the others, it will be underfed.  But, I don't want to over-optimize too
 // early and implement a special work-queue lower level link to use instead of classify, so this should
 // do for now.
-pub struct Unzipper<A> {
+struct Unzipper<A> {
     phantom: PhantomData<A>,
     by: usize,
     count: usize,

@@ -1,5 +1,5 @@
 use crate::link::utils::task_park::*;
-use crate::{Link, PacketStream, Runnable};
+use crate::{HStream, Link, Runnable};
 use crossbeam::atomic::AtomicCell;
 use crossbeam::crossbeam_channel;
 use crossbeam::crossbeam_channel::{Receiver, Sender};
@@ -10,7 +10,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 impl<Packet: Send + Sized + 'static> Link<Packet> {
-    pub(crate) fn do_join(input: Vec<PacketStream<Packet>>, cap: Option<usize>) -> Self {
+    pub(crate) fn do_join(input: Vec<HStream<Packet>>, cap: Option<usize>) -> Self {
         assert!(
             !input.is_empty(),
             format!(
@@ -46,7 +46,7 @@ impl<Packet: Send + Sized + 'static> Link<Packet> {
 }
 
 pub struct JoinRunnable<Packet: Sized> {
-    input: PacketStream<Packet>,
+    input: HStream<Packet>,
     to_egressor: Sender<Option<Packet>>,
     task_park: Arc<AtomicCell<TaskParkState>>,
 }
@@ -55,7 +55,7 @@ impl<Packet: Sized> Unpin for JoinRunnable<Packet> {}
 
 impl<Packet: Sized> JoinRunnable<Packet> {
     fn new(
-        input: PacketStream<Packet>,
+        input: HStream<Packet>,
         to_egressor: Sender<Option<Packet>>,
         task_park: Arc<AtomicCell<TaskParkState>>,
     ) -> Self {
@@ -254,7 +254,7 @@ mod tests {
 
         let mut runtime = initialize_runtime();
         let results = runtime.block_on(async move {
-            let mut inputs: Vec<PacketStream<usize>> = Vec::new();
+            let mut inputs: Vec<HStream<usize>> = Vec::new();
             for _ in 0..num_streams {
                 inputs.push(immediate_stream(0..stream_len));
             }
@@ -280,7 +280,7 @@ mod tests {
                 packets.clone().into_iter(),
             );
 
-            let inputs: Vec<PacketStream<i32>> =
+            let inputs: Vec<HStream<i32>> =
                 vec![Box::new(packet_generator0), Box::new(packet_generator1)];
 
             let link = Link::do_join(inputs, None);

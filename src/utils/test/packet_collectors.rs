@@ -1,4 +1,4 @@
-use crate::PacketStream;
+use crate::HStream;
 use crossbeam::crossbeam_channel::Sender;
 use futures::prelude::*;
 use futures::ready;
@@ -10,13 +10,13 @@ use std::pin::Pin;
 /// recieves a None. Useful for testing purposes.
 pub struct ExhaustiveDrain<T: Debug> {
     id: usize,
-    stream: PacketStream<T>,
+    stream: HStream<T>,
 }
 
 impl<T: Debug> Unpin for ExhaustiveDrain<T> {}
 
 impl<T: Debug> ExhaustiveDrain<T> {
-    pub fn new(id: usize, stream: PacketStream<T>) -> Self {
+    pub fn new(id: usize, stream: HStream<T>) -> Self {
         ExhaustiveDrain { id, stream }
     }
 }
@@ -40,14 +40,14 @@ impl<T: Debug> Future for ExhaustiveDrain<T> {
 /// may be compared in a test.
 pub struct ExhaustiveCollector<T: Debug> {
     id: usize,
-    stream: PacketStream<T>,
+    stream: HStream<T>,
     packet_dump: Sender<T>,
 }
 
 impl<T: Debug> Unpin for ExhaustiveCollector<T> {}
 
 impl<T: Debug> ExhaustiveCollector<T> {
-    pub fn new(id: usize, stream: PacketStream<T>, packet_dump: Sender<T>) -> Self {
+    pub fn new(id: usize, stream: HStream<T>, packet_dump: Sender<T>) -> Self {
         ExhaustiveCollector {
             id,
             stream,
